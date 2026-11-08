@@ -1,0 +1,18 @@
+workflow_id = "sdxl-lightning"
+revision = "1.0.0"
+title = "SDXL-Lightning · 4 步"
+engine = "comfy"
+tier = "high"
+enabled = true
+template_sha256 = "f46f4cbf609c2ece6233b1168dff58caa949f2e0cd33f7190b56d42c717bd40e"
+default_size = [512, 512]
+verified_sizes = [[512, 512], [768, 768], [1024, 1024]]
+output_node = "7"
+models = [["1","ckpt_name","sdxl_lightning_4step.safetensors"]]
+
+[inputs]
+prompt = ["2", "text"]
+width = ["4", "width"]
+height = ["4", "height"]
+seed = ["5", "seed"]
+output_prefix = ["7", "filename_prefix"]

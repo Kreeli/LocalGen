@@ -1,0 +1,27 @@
+workflow_id = "moss-image"
+revision = "1.1.0"
+title = "MOSS-Image SFT · GGUF"
+engine = "comfy"
+runner = "moss"
+tier = "high"
+enabled = true
+template_sha256 = "ab0a65c4213f9a1466f54e4fbecb7118d4e889cf80b13b96e7c93df116124f5e"
+default_size = [768, 768]
+verified_sizes = [[512, 512], [768, 768], [768, 1024], [1024, 768], [1024, 1024]]
+output_node = "2"
+models = [
+  ["1", "diffusion_model", "MOSS-Image-SFT-Q4_K.gguf"],
+  ["1", "text_encoder", "Qwen3.5-9B-Q4_K_M.gguf"],
+  ["1", "vae", "flux2-vae.safetensors"],
+  ["1", "tokenizer", "tokenizer.json"],
+]
+
+[inputs]
+prompt = ["1", "prompt"]
+negative_prompt = ["1", "negative_prompt"]
+image = ["1", "image"]
+strength = ["1", "strength"]
+width = ["1", "width"]
+height = ["1", "height"]
+seed = ["1", "seed"]
+output_prefix = ["2", "filename_prefix"]

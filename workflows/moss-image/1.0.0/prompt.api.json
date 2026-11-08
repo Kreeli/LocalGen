@@ -1,0 +1,25 @@
+{
+  "1": {
+    "class_type": "LocalGenMossImage",
+    "inputs": {
+      "diffusion_model": "MOSS-Image-SFT-Q4_K.gguf",
+      "text_encoder": "Qwen3.5-9B-Q4_K_M.gguf",
+      "vae": "flux2-vae.safetensors",
+      "tokenizer": "tokenizer.json",
+      "prompt": "",
+      "negative_prompt": "",
+      "width": 768,
+      "height": 768,
+      "seed": 0,
+      "steps": 50,
+      "cfg_scale": 3,
+      "flow_shift": 5,
+      "sampling_method": "euler",
+      "scheduler": "discrete"
+    }
+  },
+  "2": {
+    "class_type": "SaveImage",
+    "inputs": {"filename_prefix": "image", "images": ["1", 0]}
+  }
+}

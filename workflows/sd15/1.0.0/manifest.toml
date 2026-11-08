@@ -1,0 +1,19 @@
+workflow_id = "sd15"
+revision = "1.0.0"
+title = "Stable Diffusion 1.5"
+engine = "comfy"
+tier = "small"
+enabled = true
+template_sha256 = "4a06620bf14916ced27e68e9ea630aa98cdcaa74b02303e2ac3f4e765c1c13ab"
+default_size = [512, 512]
+verified_sizes = [[512, 512], [512, 768], [768, 512]]
+output_node = "7"
+models = [["1","ckpt_name","v1-5-pruned-emaonly-fp16.safetensors"]]
+
+[inputs]
+prompt = ["2", "text"]
+negative_prompt = ["3", "text"]
+width = ["4", "width"]
+height = ["4", "height"]
+seed = ["5", "seed"]
+output_prefix = ["7", "filename_prefix"]

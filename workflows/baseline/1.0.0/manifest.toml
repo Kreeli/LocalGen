@@ -1,0 +1,19 @@
+workflow_id = "baseline"
+revision = "1.0.0"
+title = "演示 · 程序生成图案"
+engine = "mock"
+tier = "demo"
+enabled = true
+template_sha256 = "7a0b92c5b76e780b2fbd246a15cb881640e92702e06c2f3616521db1762873b2"
+default_size = [512, 512]
+verified_sizes = [[512,512],[768,512],[512,768]]
+output_node = "7"
+models = []
+
+[inputs]
+prompt = ["2", "text"]
+negative_prompt = ["3", "text"]
+width = ["4", "width"]
+height = ["4", "height"]
+seed = ["5", "seed"]
+output_prefix = ["7", "filename_prefix"]

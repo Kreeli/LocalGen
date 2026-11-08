@@ -1,0 +1,22 @@
+workflow_id = "z-image-turbo"
+revision = "1.0.0"
+title = "Z-Image-Turbo · GGUF"
+engine = "comfy"
+tier = "high"
+enabled = true
+template_sha256 = "6b0181ab6ead4f2f18f1f2d448de4f6ff9d8e8861a6d71d16c21cbe99ddd8980"
+default_size = [768, 768]
+verified_sizes = [[512, 512], [768, 768], [768, 1024], [1024, 768], [1024, 1024]]
+output_node = "10"
+models = [
+  ["1", "unet_name", "z-image-turbo-Q4_K_M.gguf"],
+  ["2", "clip_name", "Qwen3-4B-Q4_K_M.gguf"],
+  ["3", "vae_name", "ae.safetensors"],
+]
+
+[inputs]
+prompt = ["4", "text"]
+width = ["7", "width"]
+height = ["7", "height"]
+seed = ["8", "seed"]
+output_prefix = ["10", "filename_prefix"]

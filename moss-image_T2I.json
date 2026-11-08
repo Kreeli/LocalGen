@@ -1,0 +1,37 @@
+{
+  "1": {
+    "class_type": "LocalGenMossImage",
+    "inputs": {
+      "diffusion_model": "MOSS-Image-SFT-Q4_K.gguf",
+      "text_encoder": "Qwen3.5-9B-Q4_K_M.gguf",
+      "vae": "flux2-vae.safetensors",
+      "tokenizer": "tokenizer.json",
+      "prompt": "{{prompt}}",
+      "negative_prompt": "",
+      "width": 768,
+      "height": 768,
+      "seed": "{{seed}}",
+      "steps": 50,
+      "cfg_scale": 3,
+      "flow_shift": 5,
+      "sampling_method": "euler",
+      "scheduler": "discrete"
+    },
+    "_meta": {
+      "title": "dsh-image-gen:moss-image:text2image"
+    }
+  },
+  "2": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "dsh-image-gen-moss-image",
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "dsh-image-gen:moss-image:text2image"
+    }
+  }
+}

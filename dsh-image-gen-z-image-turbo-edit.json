@@ -1,0 +1,61 @@
+{
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {"unet_name": "z-image-turbo-Q4_K_M.gguf"}
+  },
+  "2": {
+    "class_type": "CLIPLoaderGGUF",
+    "inputs": {"clip_name": "Qwen3-4B-Q4_K_M.gguf", "type": "lumina2"}
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {"vae_name": "ae.safetensors"}
+  },
+  "11": {
+    "class_type": "LoadImage",
+    "inputs": {"image": "{{image}}"}
+  },
+  "12": {
+    "class_type": "ImageScale",
+    "inputs": {"upscale_method": "lanczos", "width": 1024, "height": 1024, "crop": "disabled", "image": ["11", 0]}
+  },
+  "13": {
+    "class_type": "VAEEncode",
+    "inputs": {"pixels": ["12", 0], "vae": ["3", 0]}
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "{{prompt}}", "clip": ["2", 0]}
+  },
+  "5": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {"conditioning": ["4", 0]}
+  },
+  "6": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {"model": ["1", 0], "shift": 3}
+  },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["6", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["13", 0],
+      "seed": "{{seed}}",
+      "steps": 9,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 0.6
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "inputs": {"samples": ["8", 0], "vae": ["3", 0]}
+  },
+  "10": {
+    "class_type": "SaveImage",
+    "inputs": {"filename_prefix": "dsh-image-gen-edit", "images": ["9", 0]}
+  }
+}

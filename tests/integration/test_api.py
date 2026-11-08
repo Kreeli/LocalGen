@@ -142,22 +142,21 @@ class FaultEngine(MockEngine):
         return await super().recycle()
 
 
-class FakeMoss(MockEngine):
+class FakeSdcpp(MockEngine):
     def __init__(self):
         super().__init__(0.1)
-        self.moss_parameters = []
+        self.sdcpp_parameters = []
 
-    async def submit_moss(self, parameters, job_id):
-        self.moss_parameters.append(dict(parameters))
+    async def submit_sdcpp(self, workflow, graph, job_id):
+        inputs = dict(graph["1"]["inputs"])
+        self.sdcpp_parameters.append(inputs)
         return job_id
 
-    async def observe_moss(self, prompt_id):
-        buffer = BytesIO()
-        Image.new("RGB", (768, 768), (24, 48, 96)).save(buffer, "PNG")
-        return Observation(image=buffer.getvalue(), progress=(50, 50))
-
     async def observe(self, prompt_id, workflow, job_id):
-        return await self.observe_moss(prompt_id)
+        width, height = workflow.spec.default_size
+        buffer = BytesIO()
+        Image.new("RGB", (width, height), (24, 48, 96)).save(buffer, "PNG")
+        return Observation(image=buffer.getvalue(), progress=(20, 20))
 
 
 @pytest.mark.parametrize("phase", ["submitting", "running"])
@@ -297,13 +296,18 @@ def test_dsh_plugin_export(tmp_path):
         assert moss_edit.status_code == 200
         assert moss_edit.json()["1"]["inputs"]["image"] == "{{image}}"
         assert moss_edit.json()["1"]["inputs"]["strength"] == 0.5
+        kontext_edit = api.get("/api/v1/workflows/kontext-dev/dsh-plugin",
+                               params={"variant": "image2image"})
+        assert kontext_edit.status_code == 200
+        assert kontext_edit.json()["1"]["inputs"]["image"] == "{{image}}"
+        assert kontext_edit.json()["1"]["_meta"]["title"] == "dsh-image-gen:kontext-dev:image2image"
         assert api.get("/api/v1/workflows/nope/dsh-plugin").status_code == 404
         assert api.get("/api/v1/workflows/z-image-turbo/dsh-plugin",
                        params={"variant": "nope"}).status_code == 422
 
 
 def test_comfyui_gateway(tmp_path):
-    engine = FakeMoss()
+    engine = FakeSdcpp()
     with client(tmp_path, engine, engine_mode="comfy") as api:
         exported = api.get("/api/v1/workflows/z-image-turbo/dsh-plugin").json()
         assert exported["1"]["_meta"]["title"] == "dsh-image-gen:z-image-turbo:text2image"
@@ -340,7 +344,24 @@ def test_comfyui_gateway(tmp_path):
                 break
             time.sleep(0.025)
         assert entry[moss_id]["status"]["status_str"] == "success"
-        # 图生图：上传源图 → moss image2image 图 → 提交（FakeMoss 收到 image 引用）
+        # kontext（sdcpp runner）经网关文生图 + 图生图
+        kontext_graph = json.loads(json.dumps(
+            api.get("/api/v1/workflows/kontext-dev/dsh-plugin").json()))
+        kontext_graph["1"]["inputs"]["prompt"] = "网关 kontext"
+        kontext_graph["1"]["inputs"]["seed"] = 21
+        kontext = api.post("/comfyui/prompt", json={"prompt": kontext_graph})
+        assert kontext.status_code == 200, kontext.text
+        kontext_id = kontext.json()["prompt_id"]
+        deadline = time.monotonic() + 8
+        entry = {}
+        while time.monotonic() < deadline:
+            entry = api.get(f"/comfyui/history/{kontext_id}").json()
+            if entry.get(kontext_id, {}).get("status", {}).get("completed"):
+                break
+            time.sleep(0.025)
+        assert entry[kontext_id]["status"]["status_str"] == "success"
+        assert engine.sdcpp_parameters[-1]["image"] == ""
+        # 图生图：上传源图 → moss image2image 图 → 提交（FakeSdcpp 收到 image 引用）
         buffer = BytesIO()
         Image.new("RGB", (64, 64), (10, 10, 10)).save(buffer, "PNG")
         upload = api.post("/comfyui/upload/image",
@@ -366,8 +387,8 @@ def test_comfyui_gateway(tmp_path):
                 break
             time.sleep(0.025)
         assert entry[edit_id]["status"]["status_str"] == "success"
-        assert engine.moss_parameters[-1]["image"] == token
-        assert engine.moss_parameters[-1]["strength"] == 0.7
+        assert engine.sdcpp_parameters[-1]["image"] == token
+        assert engine.sdcpp_parameters[-1]["strength"] == 0.7
         # z-image 不支持图生图：网关明确拒绝
         zedit = json.loads(json.dumps(
             api.get("/api/v1/workflows/z-image-turbo/dsh-plugin",
@@ -391,7 +412,7 @@ def test_comfyui_gateway(tmp_path):
 
 
 def test_openai_compat_api(tmp_path):
-    engine = FakeMoss()
+    engine = FakeSdcpp()
     with client(tmp_path, engine, engine_mode="comfy") as api:
         models = api.get("/v1/models").json()
         assert {"moss-image", "z-image-turbo"} <= {m["id"] for m in models["data"]}
@@ -407,7 +428,7 @@ def test_openai_compat_api(tmp_path):
                         data={"model": "moss-image", "prompt": "编辑", "strength": "0.6"})
         assert edit.status_code == 200, edit.text
         assert base64.b64decode(edit.json()["data"][0]["b64_json"]).startswith(b"\x89PNG")
-        assert engine.moss_parameters[-1]["image"] and engine.moss_parameters[-1]["strength"] == 0.6
+        assert engine.sdcpp_parameters[-1]["image"] and engine.sdcpp_parameters[-1]["strength"] == 0.6
         unknown = api.post("/v1/images/generations", json={"model": "nope", "prompt": "x"})
         assert unknown.status_code == 400 and "未知模型" in unknown.json()["error"]["message"]
         assert api.post("/v1/images/generations",

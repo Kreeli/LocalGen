@@ -19,6 +19,7 @@ from localgen.config import atomic_write, guarded
 from localgen.engine import EngineStatus, Observation
 from localgen.engine.gguf import GGUF_FOLDER, verified_loader
 from localgen.engine.moss import MossJob, missing_assets
+from localgen.engine.sdcpp import KontextJob
 from localgen.engine.windows import WindowsProcess, listeners
 from localgen.jobs.models import AppError
 
@@ -270,8 +271,8 @@ class ComfyEngine:
         return response
 
     def missing(self, workflow):
-        if workflow.spec.runner == "moss" and self.moss_root is not None:
-            return missing_assets(self.moss_root)
+        if workflow.spec.runner in ("moss", "sdcpp") and self.moss_root is not None:
+            return missing_assets(self.moss_root, [name for _, _, name in workflow.spec.models])
         if self.status.state != "ready":
             return []
         return workflow.dependencies(self.object_info)
@@ -311,46 +312,45 @@ class ComfyEngine:
         self.absent_since = None
         return prompt_id
 
-    async def submit_moss(self, parameters, job_id):
-        if self.moss_root is None or missing_assets(self.moss_root):
-            raise AppError(503, "WORKFLOW_DEPENDENCIES_MISSING", "MOSS-Image 的本机文件缺失", True)
-        job = MossJob(job_id, self.folders["output"], self.moss_root, parameters,
-                      self.settings.engine_device, input_root=self.data / "gateway-input")
-        device = self.status.device
+    async def submit_sdcpp(self, workflow, graph, job_id):
+        if self.moss_root is None or missing_assets(self.moss_root, [name for _, _, name in workflow.spec.models]):
+            raise AppError(503, "WORKFLOW_DEPENDENCIES_MISSING", "本机模型文件缺失", True)
+        device = self.settings.engine_device
         node_info = self.object_info
         if not await self.stop_process():
             raise AppError(503, "ENGINE_STOP_UNCONFIRMED", "无法释放 ComfyUI 显卡资源", True)
+        job_class = MossJob if graph["1"]["class_type"] == "LocalGenMossImage" else KontextJob
+        job = job_class(job_id, self.folders["output"], self.moss_root, graph["1"]["inputs"],
+                        device, input_root=self.data / "gateway-input")
         self.moss_job = job
         try:
-            self.launch_owned(job.command, job.cwd, on_line=job.on_line)
+            self.launch_owned(job.command, job.cwd, on_line=job.on_line,
+                              log_file=guarded(self.data / "logs" / f"sdcpp-{job_id}.log"))
         except OSError as exc:
             await self.recycle()
-            raise AppError(503, "ENGINE_LAUNCH_FAILED", "MOSS-Image 引擎启动失败", True) from exc
+            raise AppError(503, "ENGINE_LAUNCH_FAILED", "引擎启动失败", True) from exc
         self.object_info = node_info
-        self.status = EngineStatus("ready", "MOSS_ACTIVE", device)
-        logger.info("MOSS_LAUNCHED job=%s pid=%s", job.job_id, self.process.pid)
+        self.status = EngineStatus("ready", "SDCPP_ACTIVE", device)
+        logger.info("SDCPP_LAUNCHED job=%s class=%s pid=%s", job.job_id,
+                    graph["1"]["class_type"], self.process.pid)
         return job.job_id
 
-    async def observe_moss(self, prompt_id):
+    async def observe_sdcpp(self, prompt_id):
         job = self.moss_job
         if job is None or job.job_id != prompt_id or self.process is None:
-            raise AppError(503, "ENGINE_RESULT_LOST", "无法找到 MOSS-Image 任务", True)
+            raise AppError(503, "ENGINE_RESULT_LOST", "无法找到任务", True)
         if self.process.alive():
             return Observation(progress=job.progress)
         code = self.process.exit_code()
         if not await self.recycle():
-            raise AppError(503, "ENGINE_STOP_UNCONFIRMED", "无法确认 MOSS-Image 引擎已经退出", True)
-        logger.info("MOSS_EXIT job=%s code=%s", job.job_id, code)
+            raise AppError(503, "ENGINE_STOP_UNCONFIRMED", "无法确认引擎已经退出", True)
+        logger.info("SDCPP_EXIT job=%s code=%s", job.job_id, code)
         return Observation(image=job.read_result(code, self.settings.max_image_mib * 2**20),
                            progress=job.progress)
 
-    async def queue(self):
-        data = await self.get("/queue")
-        return ({item[1] for item in data["queue_running"]}, {item[1] for item in data["queue_pending"]})
-
     async def observe(self, prompt_id, workflow, job_id):
-        if workflow.spec.runner == "moss":
-            return await self.observe_moss(prompt_id)
+        if workflow.spec.runner in ("moss", "sdcpp"):
+            return await self.observe_sdcpp(prompt_id)
         self.require_alive()
         item = (await self.get(f"/history/{prompt_id}")).get(prompt_id)
         if item is None:

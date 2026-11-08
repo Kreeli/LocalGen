@@ -1,0 +1,25 @@
+{
+  "1": {
+    "class_type": "LocalGenKontextImage",
+    "inputs": {
+      "diffusion_model": "flux1-kontext-dev-Q4_K_M.gguf",
+      "clip_l": "clip_l.safetensors",
+      "t5xxl": "t5-v1_1-xxl-encoder-Q4_K_S.gguf",
+      "vae": "ae.safetensors",
+      "prompt": "",
+      "negative_prompt": "",
+      "image": "",
+      "width": 1024,
+      "height": 1024,
+      "seed": 0,
+      "steps": 20,
+      "cfg_scale": 1,
+      "guidance": 2.5,
+      "sampling_method": "euler"
+    }
+  },
+  "2": {
+    "class_type": "SaveImage",
+    "inputs": {"filename_prefix": "image", "images": ["1", 0]}
+  }
+}

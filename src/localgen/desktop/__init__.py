@@ -36,6 +36,7 @@ DIAGNOSTICS = {
     "ENGINE_STOP_UNCONFIRMED": "无法确认引擎已停止，已暂停调度。",
     "WORKFLOW_NOT_VERIFIED": "此工作流等待实机验证。",
     "ENGINE_UNAVAILABLE": "工作流将在引擎就绪后进行检查。",
+    "SDCPP_ACTIVE": "sdcpp 引擎运行中。",
 }
 ROLE = Qt.ItemDataRole.UserRole
 TERMINAL = ("succeeded", "failed", "cancelled", "interrupted")

@@ -19,7 +19,7 @@ class Manifest(BaseModel):
     revision: str = Field(pattern=r"^\d+\.\d+\.\d+$")
     title: str
     engine: Literal["mock", "comfy"]
-    runner: Literal["comfy", "moss"] = "comfy"
+    runner: Literal["comfy", "moss", "sdcpp"] = "comfy"
     tier: str
     enabled: bool
     template_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -40,8 +40,8 @@ class Workflow:
         spec = self.spec
         if (spec.workflow_id, spec.revision) != (directory.parent.name, directory.name):
             raise ValueError("工作流目录与清单标识不一致")
-        if spec.runner == "moss" and spec.engine != "comfy":
-            raise ValueError("MOSS-Image 需要真实引擎")
+        if spec.runner in ("moss", "sdcpp") and spec.engine != "comfy":
+            raise ValueError("sdcpp runner 需要真实引擎")
         if self.digest != spec.template_sha256:
             raise ValueError("工作流模板摘要不一致")
         if not {"prompt", "width", "height", "seed", "output_prefix"} <= spec.inputs.keys():
@@ -131,7 +131,7 @@ class Workflow:
         graph[width_node]["inputs"][width_field] = width
         graph[height_node]["inputs"][height_field] = height
         if mode == "image2image":
-            if self.spec.runner == "moss":
+            if self.spec.runner in ("moss", "sdcpp"):
                 if "image" not in self.spec.inputs:
                     raise AppError(422, "EXPORT_UNSUPPORTED", "此工作流不支持图生图")
                 image_node, image_field = self.spec.inputs["image"]

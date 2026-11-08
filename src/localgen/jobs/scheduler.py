@@ -97,8 +97,8 @@ class Scheduler:
             attempted = True
             try:
                 async with asyncio.timeout(min(self.settings.request_timeout, self.settings.job_timeout)):
-                    if workflow.spec.runner == "moss":
-                        prompt_id = await self.engine.submit_moss(graph["1"]["inputs"], job_id)
+                    if workflow.spec.runner in ("moss", "sdcpp"):
+                        prompt_id = await self.engine.submit_sdcpp(workflow, graph, job_id)
                     else:
                         prompt_id = await self.engine.submit(graph, job_id)
             except (httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError):

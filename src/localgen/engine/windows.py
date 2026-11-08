@@ -85,7 +85,8 @@ def launch(job, handles, command: list[str], cwd: Path, env: dict[str, str]):
 
 
 class WindowsProcess:
-    def __init__(self, command: list[str], cwd: Path, env: dict[str, str], on_line=None):
+    def __init__(self, command: list[str], cwd: Path, env: dict[str, str], on_line=None,
+                 log_file: Path | None = None):
         import msvcrt
 
         import win32api
@@ -93,29 +94,44 @@ class WindowsProcess:
         import win32pipe
 
         self.job = win32job.CreateJobObject(None, "")
+        self.log_handle = None
         try:
             limits = win32job.QueryInformationJobObject(self.job, win32job.JobObjectExtendedLimitInformation)
             limits["BasicLimitInformation"]["LimitFlags"] = win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
             win32job.SetInformationJobObject(self.job, win32job.JobObjectExtendedLimitInformation, limits)
-            reader, writer = win32pipe.CreatePipe(None, 0)
-            try:
+            if log_file is not None:
+                # File-backed stdout: survives even a hard child exit, unlike a pipe.
+                self.log_handle = open(log_file, "wb", buffering=0)
+                stdout = msvcrt.get_osfhandle(self.log_handle.fileno())
+                os.set_handle_inheritable(stdout, True)
                 with open(os.devnull, "rb") as null:
                     stdin = msvcrt.get_osfhandle(null.fileno())
                     os.set_handle_inheritable(stdin, True)
-                    os.set_handle_inheritable(int(writer), True)
-                    self.pid = launch(self.job, (stdin, writer), command, cwd, env)
-            except BaseException:
-                reader.Close()
-                raise
-            finally:
-                writer.Close()
+                    self.pid = launch(self.job, (stdin, stdout), command, cwd, env)
+                self.reader = None
+            else:
+                reader, writer = win32pipe.CreatePipe(None, 0)
+                try:
+                    with open(os.devnull, "rb") as null:
+                        stdin = msvcrt.get_osfhandle(null.fileno())
+                        os.set_handle_inheritable(stdin, True)
+                        os.set_handle_inheritable(int(writer), True)
+                        self.pid = launch(self.job, (stdin, writer), command, cwd, env)
+                except BaseException:
+                    reader.Close()
+                    raise
+                finally:
+                    writer.Close()
+                self.reader = threading.Thread(target=self.drain, args=(reader, on_line or logger.info),
+                                               name="LocalGen engine logs", daemon=True)
             self.process = win32api.OpenProcess(0x00101000, False, self.pid)
             self.created_at = psutil.Process(self.pid).create_time()
-            self.reader = threading.Thread(target=self.drain, args=(reader, on_line or logger.info),
-                                           name="LocalGen engine logs", daemon=True)
-            self.reader.start()
+            if self.reader is not None:
+                self.reader.start()
         except BaseException:
             self.job.Close()
+            if getattr(self, "log_handle", None):
+                self.log_handle.close()
             if getattr(self, "process", None):
                 self.process.Close()
             raise
@@ -170,7 +186,10 @@ class WindowsProcess:
     def close(self):
         self.job.Close()
         self.process.Close()
-        self.reader.join(timeout=1)
+        if self.reader is not None:
+            self.reader.join(timeout=1)
+        if getattr(self, "log_handle", None):
+            self.log_handle.close()
 
 
 def listeners(port: int):

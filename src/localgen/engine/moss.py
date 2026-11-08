@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import UUID
 
 from localgen.config import atomic_write, guarded
+from localgen.engine.sdcpp import BIN_FILES, missing_assets  # noqa: F401  (re-exported)
 from localgen.jobs.models import AppError
 
 MODEL_FILES = {
@@ -12,24 +13,6 @@ MODEL_FILES = {
     "flux2-vae.safetensors": 336211292,
     "tokenizer.json": 19989325,
 }
-BIN_FILES = (
-    "sd-cli.exe", "stable-diffusion.dll", "ggml-base.dll", "ggml.dll", "ggml-cuda.dll",
-    "cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll",
-)
-
-
-def missing_assets(root: Path):
-    missing = []
-    for folder, files in (("bin", dict.fromkeys(BIN_FILES)), ("models", MODEL_FILES)):
-        for name, size in files.items():
-            try:
-                path = guarded(root / folder / name)
-                if path.is_file() and (size is None or path.stat().st_size == size):
-                    continue
-            except OSError:
-                pass
-            missing.append(name)
-    return missing
 
 
 class MossJob:

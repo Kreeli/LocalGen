@@ -525,8 +525,13 @@ const ROUTE_OPEN = `${PREFIX}/open`;
       useEffect(() => {
         if (!pendingFill) return;
         if (!workflows.length) return;
-        applyFill(pendingFill);
+        const { __rerun, ...fill } = pendingFill;
+        applyFill(fill);
         if (onFillConsumed) onFillConsumed();
+        if (__rerun) {
+          const wfInfo = workflows.find((item) => item.workflow_id === fill.workflow_id) || null;
+          doSubmit(buildBodyFromFill(fill, wfInfo));
+        }
       }, [pendingFill, workflows.length]);
 
       // poll active job

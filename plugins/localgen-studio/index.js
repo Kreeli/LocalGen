@@ -258,7 +258,7 @@ export function apply(ctx) {
         const apiPath = safeApiPath(body.path);
         if (!apiPath) return sendText(res, 400, '只允许代理 /api/v1/ 下的只读或生成接口');
         const method = String(body.method || 'GET').toUpperCase();
-        if (!['GET', 'POST', 'DELETE'].includes(method)) return sendText(res, 400, '不支持的请求方法');
+        if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return sendText(res, 400, '不支持的请求方法');
         const { token, baseUrl } = await resolve(ctx);
         if (!token) {
           return sendJson(res, 428, {

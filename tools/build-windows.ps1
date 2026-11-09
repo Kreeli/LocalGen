@@ -37,7 +37,7 @@ try {
     # 别的原生命令。这里显式接住退出码，避免误判。
     $exe = Join-Path $bundle 'LocalGen.exe'
     $LASTEXITCODE = 0
-    & $python (Join-Path $root '.runtime\verify_packed.py') $exe
+    & $python (Join-Path $root 'tools\verify_packed.py') $exe
     $verifyCode = $LASTEXITCODE
     if ($verifyCode -ne 0) {
         throw "Packed bytecode does not match src/ (verify_packed exit $verifyCode)."

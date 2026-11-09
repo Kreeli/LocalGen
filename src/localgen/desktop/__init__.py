@@ -502,8 +502,7 @@ class Window(QMainWindow):
         # 110 px 约 4~5 行，配合详情区的滚动条看长文。
         self.prompt_view.setFixedHeight(110)
         self.prompt_view.setPlaceholderText("选中任务后显示完整提示词")
-        self.prompt_view.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse
-                                                 | Qt.TextInteractionFlag.TextEditable)
+        self.prompt_view.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         prompt_layout.addWidget(self.prompt_view)
         layout.addWidget(self.prompt_block)
         self.prompt_block.setVisible(False)
@@ -523,8 +522,7 @@ class Window(QMainWindow):
         self.negative_view.setReadOnly(True)
         self.negative_view.setFixedHeight(72)
         self.negative_view.setPlaceholderText("这条任务没有负面提示词")
-        self.negative_view.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse
-                                                   | Qt.TextInteractionFlag.TextEditable)
+        self.negative_view.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         negative_layout.addWidget(self.negative_view)
         layout.addWidget(self.negative_block)
         self.negative_block.setVisible(False)
@@ -1111,15 +1109,26 @@ class Window(QMainWindow):
         if self.detail.text() != described:
             self.detail.setText(described)
         prompt_text = parameters["prompt"]
-        if self.prompt_view.toPlainText() != prompt_text:
+        # setPlainText 之后光标停在文档开头。轮询期间 describe 的"已用"时长
+        # 每秒变化会让详情区重排，QPlainTextEdit 重排后 ensureCursorVisible
+        # 把视图拉回光标处 = 第一行 —— 用户滚到最后一行时最刺眼（第二次反馈）。
+        # 这里记录用户所在位置，本轮更新全部做完后把它恢复回去；内容真的变了
+        # （切换到另一条任务）则回到顶部，符合"看新任务从头看"的预期。
+        prompt_changed = self.prompt_view.toPlainText() != prompt_text
+        prompt_scroll = 0 if prompt_changed else self.prompt_view.verticalScrollBar().value()
+        negative_text = " ".join((parameters.get("negative_prompt") or "").split())
+        negative_changed = self.negative_view.toPlainText() != negative_text
+        negative_scroll = 0 if negative_changed else self.negative_view.verticalScrollBar().value()
+        if prompt_changed:
             self.prompt_view.setPlainText(prompt_text)
         self.prompt_block.setVisible(bool(prompt_text))
         self.copy_prompt_button.setEnabled(bool(prompt_text))
-        negative_text = " ".join((parameters.get("negative_prompt") or "").split())
-        if self.negative_view.toPlainText() != negative_text:
+        if negative_changed:
             self.negative_view.setPlainText(negative_text)
         self.negative_block.setVisible(bool(negative_text))
         self.copy_negative_button.setEnabled(bool(negative_text))
+        if prompt_scroll or negative_scroll:
+            QTimer.singleShot(0, lambda: self._restore_detail_scroll(prompt_scroll, negative_scroll))
         self.show_reference(job)
         for control in (self.reuse_button, self.rerun_button, self.copy_json_button,
                         self.folder_button, self.log_button):
@@ -1164,6 +1173,20 @@ class Window(QMainWindow):
             self.save_button.setEnabled(True)
 
         self.api.request(result["download_path"], completed, png=True)
+
+    def _restore_detail_scroll(self, prompt_scroll: int, negative_scroll: int):
+        """轮询更新后的下一拍把用户所在位置恢复回去。
+
+        布局事件在本轮事件循环里落地，singleShot(0) 恰好排在其后；这时
+        maximum 已经稳定，直接恢复即可。任何中途的重置（幂等写入、重排）
+        都被这一拍兜住。
+        """
+        bar = self.prompt_view.verticalScrollBar()
+        if prompt_scroll and bar.value() != prompt_scroll:
+            bar.setValue(min(prompt_scroll, bar.maximum()))
+        bar = self.negative_view.verticalScrollBar()
+        if negative_scroll and bar.value() != negative_scroll:
+            bar.setValue(min(negative_scroll, bar.maximum()))
 
     def toggle_zoom(self):
         """一键把预览放大到整列（隐藏任务历史），再点还原。"""

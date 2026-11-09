@@ -40,13 +40,28 @@ def make_window(app):
     return window
 
 
+class FakeBar:
+    def __init__(self, value=0, maximum=600):
+        self._value = value
+        self.maximum_value = maximum
+
+    def value(self):
+        return self._value
+
+    def setValue(self, value):
+        self._value = min(value, self.maximum_value)
+
+    def maximum(self):
+        return self.maximum_value
+
+
 class TextBox:
     """QPlainTextEdit 的行为替身：记录 setPlainText 次数与滚动值。"""
 
     def __init__(self, text=""):
         self._text = text
         self.writes = 0
-        self.scroll = 0
+        self.bar = FakeBar()
 
     def toPlainText(self):
         return self._text
@@ -54,12 +69,15 @@ class TextBox:
     def setPlainText(self, value):
         self.writes += 1
         self._text = value
-        self.scroll = 0          # Qt 真实行为：重设文本滚动回顶
+        self.bar.setValue(0)          # Qt 真实行为：重设文本滚动回顶
 
     def clear(self):
         self.writes += 1
         self._text = ""
-        self.scroll = 0
+        self.bar.setValue(0)
+
+    def verticalScrollBar(self):
+        return self.bar
 
 
 class Box:

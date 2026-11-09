@@ -78,6 +78,11 @@ def _stage_image(content: bytes, filename: str, settings, data: Path):
     return token
 
 
+def stage_image(content: bytes, filename: str, settings, data: Path):
+    """Validate and stage one reference image; returns the submission token."""
+    return _stage_image(content, filename, settings, data)
+
+
 async def _wait_for_job(service, job_id: str, timeout: int):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

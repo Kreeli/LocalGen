@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from PySide6.QtCore import QEvent, QIODevice, QLocale, QObject, QSaveFile, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPixmap
+from PySide6.QtNetwork import QHttpMultiPart, QHttpPart
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
@@ -109,6 +110,8 @@ class Window(QMainWindow):
         self.selected_status = None
         self.real_exit = False
         self.tray_hint_shown = False
+        self._history_items = {}
+        self.reference_token = None
         self.artifact = None
         self.png = None
         self.pixmap = None
@@ -198,6 +201,30 @@ class Window(QMainWindow):
             field.addWidget(widget)
             parameters.addLayout(field, 1)
         layout.addLayout(parameters)
+        self.reference_box = QWidget()
+        ref_layout = QVBoxLayout(self.reference_box)
+        ref_layout.setContentsMargins(0, 0, 0, 0)
+        ref_layout.setSpacing(4)
+        ref_layout.addWidget(label("参考图 · 图生图模型专用", "caption"))
+        ref_row = QHBoxLayout()
+        self.reference_thumb = QLabel()
+        self.reference_thumb.setFixedSize(56, 56)
+        self.reference_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.reference_thumb.setObjectName("canvas")
+        ref_row.addWidget(self.reference_thumb)
+        ref_col = QVBoxLayout()
+        self.reference_name = label("未选择参考图", "caption", True)
+        ref_col.addWidget(self.reference_name)
+        ref_buttons = QHBoxLayout()
+        self.reference_button = button("选择图片", self.pick_reference)
+        self.reference_clear = button("清除", self.clear_reference)
+        ref_buttons.addWidget(self.reference_button)
+        ref_buttons.addWidget(self.reference_clear)
+        ref_col.addLayout(ref_buttons)
+        ref_row.addLayout(ref_col, 1)
+        ref_layout.addLayout(ref_row)
+        layout.addWidget(self.reference_box)
+        self.reference_box.setVisible(False)
         self.generate = button("生成一张", self.submit, "primary")
         self.generate.setEnabled(False)
         layout.addWidget(self.generate)
@@ -337,6 +364,10 @@ class Window(QMainWindow):
         if index >= 0:
             self.size.setCurrentIndex(index)
         self.negative.setEnabled("negative_prompt" in item.get("supported_parameters", []))
+        supports_image = "image" in item.get("supported_parameters", [])
+        self.reference_box.setVisible(supports_image)
+        if not supports_image and self.reference_token:
+            self.clear_reference()
         if item.get("missing_dependencies"):
             text = "缺少依赖\n" + "\n".join(item["missing_dependencies"])
         elif item.get("available"):
@@ -405,6 +436,8 @@ class Window(QMainWindow):
             payload["seed"] = int(self.seed.text())
         if self.negative.isEnabled() and self.negative.toPlainText().strip():
             payload["negative_prompt"] = self.negative.toPlainText().strip()
+        if self.reference_token and "image" in self.current_workflow().get("supported_parameters", []):
+            payload["image"] = self.reference_token
         if self.idempotency is None or self.idempotency[0] != payload:
             self.idempotency = payload, uuid4().hex
         self.submitting = True
@@ -437,20 +470,41 @@ class Window(QMainWindow):
         self.render_history()
 
     def render_history(self):
+        # 增量同步：仅新增/更新/移除变化的条目，避免整表重建导致的滚动跳动。
         self.list.blockSignals(True)
-        previous_scroll = self.list.verticalScrollBar().value()
-        self.list.clear()
-        for job in self.latest + self.older:
+        scroll = self.list.verticalScrollBar().value()
+        jobs = self.latest + self.older
+        seen = set()
+        for row, job in enumerate(jobs):
+            jid = job["job_id"]
+            seen.add(jid)
             prompt = " ".join(job["parameters"]["prompt"].split())
-            timestamp = datetime.fromisoformat(job["created_at"]).astimezone().strftime("%m-%d %H:%M")
-            item = QListWidgetItem(f"{STATUS[job['status']]}  ·  {timestamp}  ·  {prompt[:90]}")
-            item.setData(ROLE, job["job_id"])
+            text = (f"{STATUS[job['status']]}  ·  "
+                    f"{datetime.fromisoformat(job['created_at']).astimezone().strftime('%m-%d %H:%M')}"
+                    f"  ·  {prompt[:90]}")
+            item = self._history_items.get(jid)
+            if item is None:
+                item = QListWidgetItem(text)
+                item.setData(ROLE, jid)
+                self._history_items[jid] = item
+                self.list.insertItem(row, item)
+            else:
+                if item.text() != text:
+                    item.setText(text)
+                if self.list.row(item) != row:
+                    self.list.takeItem(self.list.row(item))
+                    self.list.insertItem(row, item)
             item.setToolTip(f"<span style='white-space:pre-wrap'>{escape(prompt)}</span>")
-            self.list.addItem(item)
-            if job["job_id"] == self.selected:
+            if jid == self.selected:
                 self.list.setCurrentItem(item)
-        self.list.verticalScrollBar().setValue(previous_scroll)
+        for jid in [key for key in self._history_items if key not in seen]:
+            stale = self._history_items.pop(jid)
+            row = self.list.row(stale)
+            if row >= 0:
+                self.list.takeItem(row)
+        self.list.setCurrentItem(self._history_items.get(self.selected))
         self.list.blockSignals(False)
+        self.list.verticalScrollBar().setValue(scroll)
         self.more.setEnabled(bool(self.cursor))
 
     def load_more(self):
@@ -561,6 +615,32 @@ class Window(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(file)))
         else:
             QMessageBox.warning(self, "无法打开", "原始 PNG 文件已丢失或被移动。")
+
+    def pick_reference(self):
+        path, _ = QFileDialog.getOpenFileName(self, "选择参考图", "",
+                                              "图片 (*.png *.jpg *.jpeg *.webp)")
+        if not path:
+            return
+        self.reference_button.setEnabled(False)
+        self.reference_name.setText("上传中…")
+
+        def uploaded(value, error):
+            self.reference_button.setEnabled(True)
+            if error:
+                self.reference_name.setText("上传失败：" + error)
+                return
+            self.reference_token = value.get("name")
+            self.reference_name.setText(Path(path).name)
+            self.reference_thumb.setPixmap(QPixmap(path).scaled(
+                self.reference_thumb.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+
+        self.api.upload_reference(path, uploaded)
+
+    def clear_reference(self):
+        self.reference_token = None
+        self.reference_thumb.clear()
+        self.reference_name.setText("未选择参考图")
 
     def copy_image(self):
         if self.pixmap is not None:

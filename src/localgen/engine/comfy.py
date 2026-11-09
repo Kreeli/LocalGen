@@ -348,6 +348,10 @@ class ComfyEngine:
         return Observation(image=job.read_result(code, self.settings.max_image_mib * 2**20),
                            progress=job.progress)
 
+    async def queue(self):
+        data = await self.get("/queue")
+        return ({item[1] for item in data["queue_running"]}, {item[1] for item in data["queue_pending"]})
+
     async def observe(self, prompt_id, workflow, job_id):
         if workflow.spec.runner in ("moss", "sdcpp"):
             return await self.observe_sdcpp(prompt_id)

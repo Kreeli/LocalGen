@@ -54,3 +54,38 @@ class Client(QObject):
                 callback(None, result.get("error", {}).get("message", "本机服务暂不可用"))
 
         reply.finished.connect(finished)
+
+    def upload_reference(self, path, callback):
+        """POST /api/v1/images with a multipart file; callback(value, error)."""
+        request = QNetworkRequest(QUrl(self.base + "/api/v1/images"))
+        request.setRawHeader(QByteArray(b"Authorization"), self.token)
+        request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,
+                             QNetworkRequest.RedirectPolicy.ManualRedirectPolicy)
+        request.setAttribute(QNetworkRequest.Attribute.Http2AllowedAttribute, False)
+        request.setTransferTimeout(30000)
+        multipart = QHttpMultiPart(QHttpMultiPart.ContentType.FormDataType)
+        part = QHttpPart()
+        name = Path(path).name
+        part.setHeader(QNetworkRequest.KnownHeaders.ContentDispositionHeader,
+                       f'form-data; name="image"; filename="{name}"')
+        file = QFile(path)
+        file.open(QIODevice.OpenModeFlag.ReadOnly)
+        part.setBodyDevice(file)
+        multipart.append(part)
+        file.setParent(multipart)
+
+        def finished():
+            code = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute) or 0
+            content = bytes(reply.readAll())
+            reply.deleteLater()
+            try:
+                result = json.loads(content)
+            except (ValueError, UnicodeError):
+                result = {}
+            if 200 <= code < 300:
+                callback(result, None)
+            else:
+                callback(None, result.get("error", {}).get("message", "本机服务暂不可用"))
+
+        reply = self.manager.post(request, multipart)
+        reply.finished.connect(finished)

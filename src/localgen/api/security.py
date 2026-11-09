@@ -44,7 +44,7 @@ class LocalSecurity:
                 await reject(401, "UNAUTHORIZED", "需要有效的本机访问令牌", {"WWW-Authenticate": "Bearer"})
                 return
         if scope["method"] in {"POST", "PUT", "PATCH", "DELETE"}:
-            upload_paths = ("/comfyui/upload/", "/v1/images/edits")
+            upload_paths = ("/comfyui/upload/", "/v1/images/edits", "/api/v1/images")
             limit = self.upload_limit if any(path.startswith(p) for p in upload_paths) else self.limit
             length = headers[b"content-length"]
             if length and (len(length) != 1 or len(length[0]) > 12 or not length[0].isdigit()):

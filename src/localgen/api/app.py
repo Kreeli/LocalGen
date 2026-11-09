@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, FastAPI, Header, Query, Response
+from fastapi import APIRouter, FastAPI, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from starlette.responses import FileResponse, JSONResponse
@@ -22,7 +22,7 @@ from localgen.storage.database import Database
 from localgen.storage.images import ImageStore
 
 from localgen.api.gateway import router as gateway_router
-from localgen.api.openai_compat import router as openai_router
+from localgen.api.openai_compat import router as openai_router, stage_image
 from localgen.api.security import LocalSecurity
 
 logger = logging.getLogger(__name__)
@@ -142,6 +142,22 @@ def make_app(data, settings, token, *, engine=None, workflow_root=None):
     @router.delete("/jobs/{job_id}", status_code=204)
     async def delete_job(job_id: UUID):
         service().delete(job_id)
+
+    @router.post("/images")
+    async def upload_reference(request: Request):
+        from fastapi import Form
+
+        try:
+            form = await request.form()
+            upload = form.get("image")
+            if upload is None or not hasattr(upload, "read"):
+                raise AppError(400, "VALIDATION_ERROR", "缺少 image 文件字段")
+            content = await upload.read()
+            token = stage_image(content, upload.filename,
+                                request.app.state.settings, request.app.state.data)
+            return {"name": token}
+        except AppError as exc:
+            return failure(exc)
 
     @router.get("/jobs/{job_id}", response_model=Job)
     async def get_job(job_id: UUID):

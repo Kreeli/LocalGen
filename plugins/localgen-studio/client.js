@@ -212,6 +212,9 @@ const ROUTE_OPEN = `${PREFIX}/open`;
 .lgs-field .hint { font-size: 10.5px; color: var(--dsw-alias-label-secondary); }
 .lgs-req-restart { color: var(--dsw-alias-state-warn-primary); }
 .lgs-ok-line { font-size: 11.5px; color: var(--dsw-alias-state-success-primary); }
+.lgs-status { margin: 0 18px 10px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.lgs-status-active { border-color: var(--dsw-alias-brand-primary); }
+.lgs-status-idle { color: var(--dsw-alias-label-secondary); }
 `;
 
     // ── sidebar glyph ───────────────────────────────────────────────────────
@@ -418,7 +421,7 @@ const ROUTE_OPEN = `${PREFIX}/open`;
      * Controlled generate form. Parent (Workbench / StudioPage) owns the
      * generation state so the history panel can back-fill it via `fillRef`.
      */
-    function GeneratePanel({ state, fillRef, onJobsChanged, pendingFill, onFillConsumed }) {
+    function GeneratePanel({ state, fillRef, onJobsChanged, pendingFill, onFillConsumed, onSubmitted }) {
       const [workflows, setWorkflows] = useState([]);
       const [workflow, setWorkflow] = useState('');
       const [workflowError, setWorkflowError] = useState('');
@@ -480,11 +483,15 @@ const ROUTE_OPEN = `${PREFIX}/open`;
       const templateSteps = engineParams.steps;
       const templateCfg = engineParams.cfg_scale;
       const supports = currentWorkflow ? currentWorkflow.supported_parameters || [] : [];
+      const required = currentWorkflow ? currentWorkflow.required_parameters || [] : [];
       const supportsImage = supports.includes('image');
       const supportsPose = supports.includes('pose_id');
       const supportsGarment = supports.includes('garment_id');
       const supportsNegative = supports.includes('negative_prompt');
       const supportsStrength = supports.includes('strength');
+      // A workflow that REQUIRES a reference image (kontext-dev). "Supports"
+      // image (moss/qwen) does NOT make it mandatory.
+      const requiredImage = required.includes('image');
 
       // when workflow changes, pick its default size if the current one is invalid
       useEffect(() => {
@@ -596,9 +603,10 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         return '';
       }, [cfg]);
 
-      // A workflow that declares image/pose/garment inputs needs at least one
-      // of them; pure text-to-image workflows only need a prompt + a model.
-      const needsRefInput = supportsImage || supportsPose || supportsGarment;
+      // Force a reference only when the workflow REQUIRES image (kontext-dev),
+      // or when it has pose/garment inputs (pose-swap) which need at least one
+      // of image/pose/garment. Pure text-to-image (moss/qwen/sd15/…) needs none.
+      const needsRefInput = requiredImage || supportsPose || supportsGarment;
       const canGenerate = Boolean(prompt.trim())
         && Boolean(workflow)
         && (!needsRefInput || Boolean(reference || pose || garment))
@@ -610,7 +618,9 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         if (!state.tokenConfigured) return '未配置 LocalGen 访问令牌，请到「设置」填写';
         if (!workflow) return '工作流未加载（下拉为空？点重试）';
         if (!prompt.trim()) return '请输入提示词';
-        if (needsRefInput && !(reference || pose || garment)) return '该工作流需要参考图 / 姿势 / 服装中的至少一项';
+        if (needsRefInput && !(reference || pose || garment)) {
+          return requiredImage ? '此工作流必须上传参考图' : '此工作流需要参考图 / 姿势 / 服装中的至少一项';
+        }
         if (stepsError) return stepsError;
         if (cfgError) return cfgError;
         if (submitting) return '正在提交';
@@ -628,6 +638,7 @@ const ROUTE_OPEN = `${PREFIX}/open`;
           setStartedAt(Date.now());
           setJobId(job0.job_id);
           if (onJobsChanged) onJobsChanged();
+          if (onSubmitted) onSubmitted(job0);
         } catch (failure) {
           let suffix = '';
           if (failure.code === 'INPUT_IMAGE_MISSING') {
@@ -1264,12 +1275,79 @@ const ROUTE_OPEN = `${PREFIX}/open`;
       );
     }
 
+    // ── status card (always visible) ────────────────────────────────────────
+
+    function StatusCard({ state }) {
+      const [snap, setSnap] = useState(null);
+      const [error, setError] = useState('');
+
+      useEffect(() => {
+        if (!state || !state.tokenConfigured) return undefined;
+        let cancelled = false;
+        let timer = null;
+        const tick = async () => {
+          try {
+            const data = await callApi('/api/v1/progress');
+            if (cancelled) return;
+            setSnap(data);
+            setError('');
+            timer = setTimeout(tick, POLL_MS);
+          } catch (failure) {
+            if (!cancelled) {
+              setError(failure.message || String(failure));
+              timer = setTimeout(tick, POLL_MS * 2);
+            }
+          }
+        };
+        tick();
+        return () => { cancelled = true; if (timer) clearTimeout(timer); };
+      }, [state]);
+
+      const job = snap && snap.job ? snap.job : null;
+      const queued = snap ? snap.queued || 0 : 0;
+      const active = job && ACTIVE.includes(job.status);
+      const progress = job && job.progress ? job.progress : null;
+
+      let elapsed = '';
+      if (job && job.started_at) {
+        const from = Date.parse(job.started_at);
+        if (Number.isFinite(from)) {
+          elapsed = fmtElapsed((Date.now() - from) / 1000);
+        }
+      }
+
+      const stageText = !progress ? '准备中' : ({ loading: '加载模型', sampling: '采样', decoding: '解码' }[progress.stage] || progress.stage);
+      const stepText = progress && progress.total ? (progress.current || 0) + '/' + progress.total : '';
+
+      let line = '';
+      if (active) {
+        line = '正在跑 ' + (job.workflow_id || '') + ' · ' + stageText + (stepText ? ' · ' + stepText : '') + (elapsed ? ' · 已用 ' + elapsed : '');
+      } else if (queued > 0) {
+        line = '队列 ' + queued + ' 条 · 等待引擎';
+      }
+
+      if (!line && !error) {
+        // idle: render a slim empty strip so layout is stable
+        return h('div', { className: 'lgs-status lgs-status-idle' }, h('span', null, '空闲'));
+      }
+
+      return h('div', { className: 'lgs-status' + (active ? ' lgs-status-active' : '') },
+        error ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, error) : h('span', null, line)
+      );
+    }
+
     // ── workbench (top conversation.view) ───────────────────────────────────
 
     function Workbench({ state, refresh, onJobsChanged }) {
       const [tab, setTab] = useState('generate');
       const [pendingFill, setPendingFill] = useState(null);
       const [openNote, setOpenNote] = useState('');
+      const [toast, setToast] = useState('');
+
+      const showToast = useCallback((message) => {
+        setToast(message);
+        setTimeout(() => setToast((current) => (current === message ? '' : current)), 5000);
+      }, []);
 
       const doOpenLocalGen = async () => {
         setOpenNote('');
@@ -1321,6 +1399,10 @@ const ROUTE_OPEN = `${PREFIX}/open`;
             onClick: () => setTab(item.id),
           }, item.label))
         ),
+        toast
+          ? h('div', { style: { position: 'fixed', right: 18, bottom: 18, zIndex: 950, padding: '10px 16px', borderRadius: 8, background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-brand-primary)', boxShadow: '0 8px 24px rgba(0,0,0,.3)', fontSize: 12.5, color: 'var(--dsw-alias-label-primary)' } }, toast)
+          : null,
+        h(StatusCard, { state }),
         h('div', { className: 'lgs-body' },
           !state || !state.tokenConfigured
             ? h('div', { className: 'lgs-card' },
@@ -1328,11 +1410,16 @@ const ROUTE_OPEN = `${PREFIX}/open`;
               h('div', { className: 'lgs-note' }, '面板通过本机 DSH 转发通道访问 LocalGen，需要一次 Bearer 令牌。'),
               h('button', { className: 'lgs-btn', style: { marginTop: 10 }, onClick: () => setTab('settings') }, '打开设置')
             )
-            : (tab === 'generate'
-              ? h(GeneratePanel, { state, onJobsChanged, pendingFill, onFillConsumed: clearPendingFill })
-              : tab === 'history'
-                ? h(HistoryPanel, { state, onReuse: requestFill })
-                : h(SettingsPanel, { state, refresh }))
+            : h('div', null,
+              // All three panels stay mounted; only the active one is visible.
+              // This preserves every input across tab switches (no unmount).
+              h('div', { style: { display: tab === 'generate' ? 'block' : 'none' } },
+                h(GeneratePanel, { state, onJobsChanged, pendingFill, onFillConsumed: clearPendingFill, onSubmitted: (job0) => showToast('已提交任务 ' + String(job0.job_id || '').slice(0, 8) + '，可在「历史」查看') })),
+              h('div', { style: { display: tab === 'history' ? 'block' : 'none' } },
+                h(HistoryPanel, { state, onReuse: requestFill })),
+              h('div', { style: { display: tab === 'settings' ? 'block' : 'none' } },
+                h(SettingsPanel, { state, refresh }))
+            )
         )
       );
     }

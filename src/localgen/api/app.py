@@ -26,6 +26,7 @@ from localgen.storage.libraries import KINDS, LibraryStore
 from localgen.api.gateway import router as gateway_router
 from localgen.api.openai_compat import router as openai_router, stage_image
 from localgen.api.security import LocalSecurity
+from localgen.api.settings import build_router as settings_router
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +270,7 @@ def make_app(data, settings, token, *, engine=None, workflow_root=None):
     app.include_router(router)
     app.include_router(gateway_router)
     app.include_router(openai_router)
+    app.include_router(settings_router())
     manager, route = build_mcp(service, hosts)
     app.router.routes.append(route)
     return app

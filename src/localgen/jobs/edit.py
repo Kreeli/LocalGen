@@ -47,6 +47,9 @@ class EditRequest(BaseModel):
     size: Annotated[list[Size], Field(min_length=2, max_length=2)] | None = None
     seed: Seed | None = None
     negative_prompt: Negative | None = None
+    # 扩散步数 / CFG 覆盖：None = 工作流模板默认。上限见 jobs/models.py 注释。
+    steps: Annotated[int, Field(strict=True, ge=1, le=25)] | None = None
+    cfg_scale: Annotated[float, Field(strict=True, ge=1, le=15)] | None = None
 
 
 def choose_engine(request: EditRequest) -> tuple[str, str]:
@@ -95,4 +98,6 @@ def to_submission(request: EditRequest, registry) -> Submission:
         image=request.image,
         pose_id=request.pose,
         garment_id=request.garment,
+        steps=request.steps,
+        cfg_scale=request.cfg_scale,
     )

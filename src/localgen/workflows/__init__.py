@@ -161,6 +161,13 @@ class Workflow:
                 if field in inputs:
                     values[field] = inputs[field]
                     break
+        # 步数 / CFG 覆盖：Submission 传了才覆盖，None 保持模板默认。
+        # sigmas 预设是固定档位表（turbo = 8 档），步数与档位不匹配会错拍，
+        # 引擎侧对 turbo 做了保护，这里照常传递。
+        if request.steps is not None:
+            values["steps"] = request.steps
+        if request.cfg_scale is not None:
+            values["cfg_scale"] = request.cfg_scale
         return values
 
     def render(self, parameters: dict, job_id: str) -> dict:

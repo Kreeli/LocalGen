@@ -294,8 +294,9 @@ class QwenImageJob:
             "--backend", f"diffusion=cuda{device},te=cpu,vae=cuda{device}", "--max-vram", "-1",
             "--flash-attn", "auto", "--threads", "6",
         ]
-        if parameters.get("sigmas"):
-            self.command.extend(["--sigmas", str(parameters["sigmas"])])
+        sigmas = turbo_safe_sigmas(parameters)
+        if sigmas:
+            self.command.extend(["--sigmas", sigmas])
         if ref_image is not None:
             self.command.extend(["--ref-image", str(ref_image), "--llm_vision", vision])
 
@@ -313,6 +314,20 @@ class QwenImageJob:
         if len(image) > limit:
             raise AppError(422, "INVALID_IMAGE", "结果图片大小超限")
         return image
+
+
+def turbo_safe_sigmas(parameters) -> str | None:
+    """qwen-image-2.1-turbo 是固定 8 档 sigma 表，步数不是 8 时会错拍。
+
+    用户可经 Submission.steps 覆盖步数（上限 25）；模板默认 8 步配 turbo。
+    步数被改走时丢掉预设、回落 euler 默认 schedule——慢一点，但不会出坏图。
+    """
+    sigmas = parameters.get("sigmas")
+    if not sigmas:
+        return None
+    if "turbo" in str(sigmas) and int(parameters.get("steps") or 8) != 8:
+        return None
+    return str(sigmas)
 
 
 class PoseSwapJob(QwenImageJob):
@@ -386,8 +401,9 @@ class PoseSwapJob(QwenImageJob):
             "--backend", f"diffusion=cuda{device},te=cpu,vae=cuda{device}", "--max-vram", "-1",
             "--flash-attn", "auto", "--threads", "6",
         ]
-        if parameters.get("sigmas"):
-            self.command.extend(["--sigmas", str(parameters["sigmas"])])
+        sigmas = turbo_safe_sigmas(parameters)
+        if sigmas:
+            self.command.extend(["--sigmas", sigmas])
         # 姿势 LoRA：sd-cli 扫目录自动加载，不需要点名文件。
         # 实测 V1.1（rank 32，base=qwen_image_2）在 8 步 turbo 下能跟随骨骼姿势，
         # 代价约 +59 s（253 → 312 s），换取更稳的服装/背景保持。

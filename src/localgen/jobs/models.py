@@ -13,6 +13,11 @@ Size = Annotated[int, Field(strict=True, ge=1, le=8192)]
 Seed = Annotated[int, Field(strict=True, ge=0, le=4294967295)]
 Key = Annotated[str, StringConstraints(pattern=r"^[!-~]{1,128}$")]
 ImageToken = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}\.(png|jpg|webp)$")]
+# 扩散步数覆盖：留空 = 工作流模板默认。上限 25 —— 用户要求"默认用模型原始的
+# 25"，且实测 8 步 turbo 在 6 GB 上与 20 步画质无差别，更高只是慢。
+Steps = Annotated[int, Field(strict=True, ge=1, le=25)]
+# CFG 覆盖：模板默认 1（kontext/pose-swap）到 6（qwen t2i），>15 无意义。
+CfgScale = Annotated[float, Field(strict=True, ge=1, le=15)]
 # 图库条目 id：来源是第三方索引，含中文、点、横线、日文分类前缀，放宽到「不许有路径分隔符」。
 LibraryItemId = Annotated[str, StringConstraints(
     strip_whitespace=True, min_length=1, max_length=80,
@@ -34,6 +39,9 @@ class Submission(BaseModel):
     # 换姿势 / 换服装：图库条目 id，引擎据此取素材当参考图。
     pose_id: LibraryItemId | None = None
     garment_id: LibraryItemId | None = None
+    # 扩散步数 / CFG 覆盖：None = 用工作流模板默认值（推荐）。上限见类型注释。
+    steps: Steps | None = None
+    cfg_scale: CfgScale | None = None
 
     @model_validator(mode="after")
     def paired_dimensions(self):

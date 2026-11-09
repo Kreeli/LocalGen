@@ -17,6 +17,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 
 export const name = 'localgen-studio';
 
@@ -29,8 +30,10 @@ const ROUTE_CONFIG = `${PREFIX}/config`;
 const ROUTE_RPC = `${PREFIX}/rpc`;
 const ROUTE_RAW = `${PREFIX}/raw`;
 const ROUTE_UPLOAD = `${PREFIX}/upload`;
+const ROUTE_OPEN = `${PREFIX}/open`;
 
 const DEFAULT_BASE = 'http://127.0.0.1:12138';
+const DEFAULT_EXE = 'D:\\garbage pile\\local_image\\dist\\LocalGen\\LocalGen.exe';
 const RECORD_KEY = 'localgen-studio/default';
 const JSON_LIMIT = 2 * 2 ** 20;
 const UPLOAD_LIMIT = 64 * 2 ** 20;
@@ -87,14 +90,15 @@ async function readStored(ctx) {
   const file = await readSettingsFile();
   const fileToken = typeof file.token === 'string' && file.token.trim() ? file.token.trim() : undefined;
   const fileBase = typeof file.baseUrl === 'string' && file.baseUrl.trim() ? file.baseUrl.trim() : undefined;
+  const fileExe = typeof file.exePath === 'string' && file.exePath.trim() ? file.exePath.trim() : undefined;
   // Credentials (when present) wins for baseUrl, but a token missing there
   // falls back to the file so a baseUrl-only update never loses the token.
   const token = credentialToken || fileToken;
   const baseUrl = credentialBase || fileBase;
-  return { token, baseUrl, source: (credentialToken || credentialBase) ? 'credentials' : 'file' };
+  return { token, baseUrl, exePath: fileExe, source: (credentialToken || credentialBase) ? 'credentials' : 'file' };
 }
 
-async function writeStored(ctx, { token, baseUrl }) {
+async function writeStored(ctx, { token, baseUrl, exePath }) {
   // An empty string token means "leave unchanged", not "clear": the UI only
   // sends a non-empty token when the user actually typed one. This prevents a
   // baseUrl-only edit from wiping a previously stored token.
@@ -114,6 +118,7 @@ async function writeStored(ctx, { token, baseUrl }) {
       await writeSettingsFile({
         ...(baseUrl !== undefined ? { baseUrl } : {}),
         ...(tokenGiven ? { token: token.trim() } : {}),
+        ...(exePath !== undefined ? { exePath } : {}),
       });
       return 'credentials';
     } catch {
@@ -123,6 +128,7 @@ async function writeStored(ctx, { token, baseUrl }) {
   await writeSettingsFile({
     ...(baseUrl !== undefined ? { baseUrl } : {}),
     ...(tokenGiven ? { token: token.trim() } : {}),
+    ...(exePath !== undefined ? { exePath } : {}),
   });
   return 'file';
 }
@@ -136,6 +142,7 @@ async function resolve(ctx) {
   return {
     token,
     baseUrl,
+    exePath: stored.exePath,
     source: envToken ? 'env' : stored.source,
     tokenConfigured: Boolean(token),
   };
@@ -223,8 +230,9 @@ export function apply(ctx) {
       try {
         const resolved = await resolve(ctx);
         sendJson(res, 200, {
-          version: '0.1.0',
+          version: '0.2.0',
           baseUrl: resolved.baseUrl,
+          exePath: resolved.exePath || DEFAULT_EXE,
           tokenConfigured: resolved.tokenConfigured,
           tokenSource: resolved.source,
         });
@@ -247,11 +255,13 @@ export function apply(ctx) {
           patch.baseUrl = value || DEFAULT_BASE;
         }
         if (typeof body.token === 'string') patch.token = body.token.trim();
+        if (typeof body.exePath === 'string') patch.exePath = body.exePath.trim();
         const stored = await writeStored(ctx, patch);
         const resolved = await resolve(ctx);
         sendJson(res, 200, {
           stored,
           baseUrl: resolved.baseUrl,
+          exePath: resolved.exePath || DEFAULT_EXE,
           tokenConfigured: resolved.tokenConfigured,
           tokenSource: resolved.source,
         });
@@ -260,6 +270,34 @@ export function apply(ctx) {
           String(error && error.message ? error.message : error));
       }
     }, 'localgen-studio: config route');
+
+    route(ROUTE_OPEN, async (req, res) => {
+      if (!sameOrigin(req)) return sendText(res, 403, 'origin rejected');
+      if (req.method !== 'POST') return sendText(res, 405, 'method not allowed');
+      try {
+        const { baseUrl, exePath } = await resolve(ctx);
+        try {
+          const probe = await fetch(baseUrl + '/api/v1/health', { signal: AbortSignal.timeout(2000) });
+          if (probe.ok) {
+            return sendJson(res, 200, { status: 'running', message: 'LocalGen 已在运行', baseUrl });
+          }
+        } catch {
+          // not reachable — fall through to spawn
+        }
+        const exe = exePath || DEFAULT_EXE;
+        try {
+          await fs.access(exe);
+        } catch {
+          return sendJson(res, 404, { status: 'missing', message: '未找到 LocalGen 程序：' + exe });
+        }
+        const child = spawn(exe, [], { detached: true, stdio: 'ignore', windowsHide: false });
+        child.on('error', () => {});
+        child.unref();
+        return sendJson(res, 200, { status: 'launched', message: '已启动 LocalGen：' + exe });
+      } catch (error) {
+        sendText(res, 500, String(error && error.message ? error.message : error));
+      }
+    }, 'localgen-studio: open route');
 
     route(ROUTE_RPC, async (req, res) => {
       if (!sameOrigin(req)) return sendText(res, 403, 'origin rejected');

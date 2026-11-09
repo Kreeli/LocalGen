@@ -11,6 +11,7 @@ window.__ModuleLoader__.load({
     const ROUTE_RPC = `${PREFIX}/rpc`;
     const ROUTE_RAW = `${PREFIX}/raw`;
     const ROUTE_UPLOAD = `${PREFIX}/upload`;
+const ROUTE_OPEN = `${PREFIX}/open`;
 
     const PAGE_SIZE = 60;
     const POLL_MS = 2500;
@@ -69,6 +70,15 @@ window.__ModuleLoader__.load({
         throw new Error(detail ? detail.message || detail.code : '上传失败');
       }
       return payload.data;
+    }
+
+    // Open the LocalGen desktop app: host probes health first, only spawns
+    // when nothing is listening (InstanceLock would make a second launch fail).
+    async function openLocalGen() {
+      const response = await fetch(ROUTE_OPEN, { method: 'POST' });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((data && data.error && data.error.message) || ('HTTP ' + response.status));
+      return data;
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
@@ -408,7 +418,7 @@ window.__ModuleLoader__.load({
      * Controlled generate form. Parent (Workbench / StudioPage) owns the
      * generation state so the history panel can back-fill it via `fillRef`.
      */
-    function GeneratePanel({ state, fillRef, onJobsChanged }) {
+    function GeneratePanel({ state, fillRef, onJobsChanged, pendingFill, onFillConsumed }) {
       const [workflows, setWorkflows] = useState([]);
       const [workflow, setWorkflow] = useState('');
       const [workflowError, setWorkflowError] = useState('');
@@ -510,6 +520,15 @@ window.__ModuleLoader__.load({
         if (fillRef) fillRef.current = applyFill;
       }, [applyFill, fillRef]);
 
+      // Consume a pending fill passed from the parent (history reuse) once,
+      // after workflows are loaded so workflow_id/size validation can run.
+      useEffect(() => {
+        if (!pendingFill) return;
+        if (!workflows.length) return;
+        applyFill(pendingFill);
+        if (onFillConsumed) onFillConsumed();
+      }, [pendingFill, workflows.length]);
+
       // poll active job
       useEffect(() => {
         if (!jobId) return undefined;
@@ -572,41 +591,33 @@ window.__ModuleLoader__.load({
         return '';
       }, [cfg]);
 
+      // A workflow that declares image/pose/garment inputs needs at least one
+      // of them; pure text-to-image workflows only need a prompt + a model.
+      const needsRefInput = supportsImage || supportsPose || supportsGarment;
       const canGenerate = Boolean(prompt.trim())
         && Boolean(workflow)
-        && Boolean(reference || pose || garment)
+        && (!needsRefInput || Boolean(reference || pose || garment))
         && !submitting && state && state.tokenConfigured
         && !stepsError && !cfgError;
 
-      const generate = async () => {
+      const disabledReason = useMemo(() => {
+        if (!state) return '连接状态未加载';
+        if (!state.tokenConfigured) return '未配置 LocalGen 访问令牌，请到「设置」填写';
+        if (!workflow) return '工作流未加载（下拉为空？点重试）';
+        if (!prompt.trim()) return '请输入提示词';
+        if (needsRefInput && !(reference || pose || garment)) return '该工作流需要参考图 / 姿势 / 服装中的至少一项';
+        if (stepsError) return stepsError;
+        if (cfgError) return cfgError;
+        if (submitting) return '正在提交';
+        return '';
+      }, [state, workflow, prompt, reference, pose, garment, needsRefInput, stepsError, cfgError, submitting]);
+
+      const doSubmit = async (body) => {
         setError('');
         setJob(null);
         setJobId(null);
         setSubmitting(true);
         try {
-          const parsedSize = parseSizeKey(size);
-          const body = {
-            workflow_id: workflow,
-            prompt: prompt.trim(),
-          };
-          if (parsedSize) {
-            body.width = parsedSize[0];
-            body.height = parsedSize[1];
-          }
-          if (seed.trim() !== '') {
-            const value = Number(seed);
-            if (Number.isInteger(value) && value >= 0 && value <= 4294967295) body.seed = value;
-          }
-          if (negative.trim() !== '' && supportsNegative) body.negative_prompt = negative.trim();
-          if (reference) body.image = reference.name;
-          if (pose) body.pose_id = pose.id;
-          if (garment) body.garment_id = garment.id;
-          if (strength.trim() !== '' && supportsStrength) {
-            const value = Number(strength);
-            if (Number.isFinite(value) && value > 0 && value <= 1) body.strength = value;
-          }
-          if (steps.trim() !== '') body.steps = Number(steps);
-          if (cfg.trim() !== '') body.cfg_scale = Number(cfg);
           const job0 = await callApi('/api/v1/jobs', 'POST', body);
           setJob(job0);
           setStartedAt(Date.now());
@@ -623,6 +634,53 @@ window.__ModuleLoader__.load({
         } finally {
           setSubmitting(false);
         }
+      };
+
+      const generate = async () => {
+        const parsedSize = parseSizeKey(size);
+        const body = { workflow_id: workflow, prompt: prompt.trim() };
+        if (parsedSize) {
+          body.width = parsedSize[0];
+          body.height = parsedSize[1];
+        }
+        if (seed.trim() !== '') {
+          const value = Number(seed);
+          if (Number.isInteger(value) && value >= 0 && value <= 4294967295) body.seed = value;
+        }
+        if (negative.trim() !== '' && supportsNegative) body.negative_prompt = negative.trim();
+        if (reference) body.image = reference.name;
+        if (pose) body.pose_id = pose.id;
+        if (garment) body.garment_id = garment.id;
+        if (strength.trim() !== '' && supportsStrength) {
+          const value = Number(strength);
+          if (Number.isFinite(value) && value > 0 && value <= 1) body.strength = value;
+        }
+        if (steps.trim() !== '') body.steps = Number(steps);
+        if (cfg.trim() !== '') body.cfg_scale = Number(cfg);
+        await doSubmit(body);
+      };
+
+      // Build a submit body directly from a history fill (for rerun), without
+      // waiting on React state to settle after back-fill.
+      const buildBodyFromFill = (fill, workflowInfo) => {
+        const supports = workflowInfo ? (workflowInfo.supported_parameters || []) : [];
+        const body = { workflow_id: fill.workflow_id, prompt: String(fill.prompt || '') };
+        if (fill.width && fill.height) {
+          body.width = fill.width;
+          body.height = fill.height;
+        }
+        if (fill.negative_prompt && supports.includes('negative_prompt')) body.negative_prompt = fill.negative_prompt;
+        if (fill.imageToken) body.image = fill.imageToken;
+        if (fill.pose && fill.pose.id) body.pose_id = fill.pose.id;
+        if (fill.garment && fill.garment.id) body.garment_id = fill.garment.id;
+        if (fill.strength && supports.includes('strength')) {
+          const value = Number(fill.strength);
+          if (Number.isFinite(value) && value > 0 && value <= 1) body.strength = value;
+        }
+        if (fill.steps != null && String(fill.steps) !== '') body.steps = Number(fill.steps);
+        if (fill.cfg_scale != null && String(fill.cfg_scale) !== '') body.cfg_scale = Number(fill.cfg_scale);
+        // rerun = fresh random seed: omit seed so the service generates one
+        return body;
       };
 
       const progress = job && job.progress ? job.progress : null;
@@ -791,6 +849,10 @@ window.__ModuleLoader__.load({
               disabled: !canGenerate,
               onClick: generate,
             }, submitting ? '提交中…' : '生成一张'),
+            !canGenerate && disabledReason
+              ? h('div', { className: 'lgs-note', style: { marginTop: 8, color: 'var(--dsw-alias-state-warn-primary)' } },
+                '为何不能生成：' + disabledReason)
+              : null,
             h('div', { className: 'lgs-note lgs-warn', style: { marginTop: 8, textAlign: 'center' } },
               '编辑类单张预计 5–8 分钟，请勿重复点击')
           ),
@@ -853,7 +915,7 @@ window.__ModuleLoader__.load({
 
     // ── history panel ───────────────────────────────────────────────────────
 
-    function HistoryPanel({ state, fillRef }) {
+    function HistoryPanel({ state, onReuse }) {
       const [items, setItems] = useState([]);
       const [cursor, setCursor] = useState(null);
       const [loading, setLoading] = useState(false);
@@ -960,8 +1022,8 @@ window.__ModuleLoader__.load({
           const garmentInfo = await resolveLibraryItem('garments', params.garment_id);
           if (garmentInfo) fill.garment = garmentInfo;
         }
-        if (fillRef && fillRef.current) fillRef.current(fill);
-      }, [fillRef, resolveLibraryItem]);
+        if (onReuse) onReuse(fill, rerun);
+      }, [onReuse, resolveLibraryItem]);
 
       const Detail = ({ job }) => {
         const params = job.parameters || {};
@@ -1074,6 +1136,7 @@ window.__ModuleLoader__.load({
       const [pluginBase, setPluginBase] = useState('');
       const [pluginToken, setPluginToken] = useState('');
       const [pollMs, setPollMs] = useState(String(POLL_MS));
+      const [exePath, setExePath] = useState('');
       const [pluginNote, setPluginNote] = useState('');
 
       const [serverSettings, setServerSettings] = useState(null);
@@ -1085,6 +1148,7 @@ window.__ModuleLoader__.load({
         if (state) {
           setPluginBase(state.baseUrl || '');
           if (state.pollMs) setPollMs(String(state.pollMs));
+          if (state.exePath) setExePath(state.exePath);
         }
       }, [state]);
 
@@ -1107,7 +1171,7 @@ window.__ModuleLoader__.load({
           const response = await fetch(ROUTE_CONFIG, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ baseUrl: pluginBase, token: pluginToken, pollMs: Number(pollMs) || POLL_MS }),
+            body: JSON.stringify({ baseUrl: pluginBase, token: pluginToken, pollMs: Number(pollMs) || POLL_MS, exePath }),
           });
           const data = await response.json();
           if (!response.ok) throw new Error(data && data.error ? data.error.message : `HTTP ${response.status}`);
@@ -1157,6 +1221,8 @@ window.__ModuleLoader__.load({
           h('input', { className: 'lgs-input', type: 'password', value: pluginToken, onChange: (event) => setPluginToken(event.target.value), placeholder: state && state.tokenConfigured ? '已保存，留空则不修改' : '粘贴 LocalGen 的 Bearer 令牌' }),
           h('label', { className: 'lgs-label' }, '进度轮询间隔（毫秒）'),
           h('input', { className: 'lgs-input', value: pollMs, onChange: (event) => setPollMs(event.target.value) }),
+          h('label', { className: 'lgs-label' }, 'LocalGen 程序路径'),
+          h('input', { className: 'lgs-input', value: exePath, onChange: (event) => setExePath(event.target.value), placeholder: 'D:\\garbage pile\\local_image\\dist\\LocalGen\\LocalGen.exe' }),
           h('div', { className: 'lgs-row', style: { marginTop: 10 } },
             h('button', { className: 'lgs-btn', onClick: savePlugin }, '保存插件设置'),
             pluginNote ? h('span', { className: 'lgs-note', style: { alignSelf: 'center', color: pluginNote.startsWith('保存失败') ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)' } }, pluginNote) : null
@@ -1197,22 +1263,28 @@ window.__ModuleLoader__.load({
 
     function Workbench({ state, refresh, onJobsChanged }) {
       const [tab, setTab] = useState('generate');
-      const fillRef = useRef(null);
-      const [genKey, setGenKey] = useState(0);
+      const [pendingFill, setPendingFill] = useState(null);
+      const [openNote, setOpenNote] = useState('');
 
-      const jumpToGenerate = useCallback(() => {
+      const doOpenLocalGen = async () => {
+        setOpenNote('');
+        try {
+          const data = await openLocalGen();
+          setOpenNote(data.message || (data.status === 'running' ? 'LocalGen 已在运行' : '已启动'));
+        } catch (failure) {
+          setOpenNote('打开失败：' + (failure.message || failure));
+        }
+      };
+
+      // History reuse: stash the fill and switch to the generate tab. The
+      // GeneratePanel consumes it on mount — no reliance on a stale ref to an
+      // unmounted component.
+      const requestFill = useCallback((fill, rerun) => {
+        setPendingFill({ ...fill, __rerun: Boolean(rerun) });
         setTab('generate');
-        // force re-mount so GeneratePanel's fill effect reattaches cleanly
-        setGenKey((k) => k + 1);
       }, []);
 
-      const wrappedFill = useRef(null);
-      useEffect(() => {
-        wrappedFill.current = (fill) => {
-          if (fillRef.current) fillRef.current(fill);
-          jumpToGenerate();
-        };
-      }, [jumpToGenerate]);
+      const clearPendingFill = useCallback(() => setPendingFill(null), []);
 
       const tabs = [
         { id: 'generate', label: '生成' },
@@ -1230,8 +1302,12 @@ window.__ModuleLoader__.load({
           state && state.tokenConfigured
             ? h('span', { className: 'lgs-pill' }, '已连接')
             : h('span', { className: 'lgs-pill lgs-warn' }, '未配置令牌'),
+          h('button', { className: 'lgs-btn', onClick: doOpenLocalGen }, '打开 LocalGen'),
           h('button', { className: 'lgs-btn', onClick: () => setTab('settings') }, '设置')
         ),
+        openNote
+          ? h('div', { style: { padding: '6px 18px 0', fontSize: '12px', color: openNote.startsWith('打开失败') ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)' } }, openNote)
+          : null,
         h('div', { className: 'lgs-tabs' },
           tabs.map((item) => h('button', {
             key: item.id,
@@ -1248,9 +1324,9 @@ window.__ModuleLoader__.load({
               h('button', { className: 'lgs-btn', style: { marginTop: 10 }, onClick: () => setTab('settings') }, '打开设置')
             )
             : (tab === 'generate'
-              ? h(GeneratePanel, { key: genKey, state, fillRef, onJobsChanged })
+              ? h(GeneratePanel, { state, onJobsChanged, pendingFill, onFillConsumed: clearPendingFill })
               : tab === 'history'
-                ? h(HistoryPanel, { state, fillRef: wrappedFill })
+                ? h(HistoryPanel, { state, onReuse: requestFill })
                 : h(SettingsPanel, { state, refresh }))
         )
       );

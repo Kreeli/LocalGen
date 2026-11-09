@@ -63,7 +63,7 @@ SDCPP_TARGETS = {
         "job": "LocalGenQwenImage21",
         "title": "Qwen-Image-2.1 · GGUF",
         "revision": "1.0.0",
-        "sizes": [(1024, 1024)],
+        "sizes": [(1024, 1024), (768, 768), (1024, 768), (768, 1024), (1152, 896)],
         "steps": (4, 40, 30),        # (下限, 上限, 默认)
         "cfg": (1.0, 8.0, 6.0),
         "samples": ("euler",),

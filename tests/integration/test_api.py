@@ -540,7 +540,13 @@ def test_qwen_image_21_workflow(tmp_path):
         rejected = post(api, {"workflow_id": "qwen-image-21", "prompt": "x", "strength": 0.6})
         assert rejected.status_code == 422
         assert rejected.json()["error"]["code"] == "UNSUPPORTED_PARAMETER"
-        size = post(api, {"workflow_id": "qwen-image-21", "prompt": "x", "width": 768, "height": 768})
+        # 2026-11-10 尺寸扩充：768²/1024×768/768×1024/1152×896 已实测入白名单；
+        # 白名单外（1536²）仍拒绝。
+        ok = post(api, {"workflow_id": "qwen-image-21", "prompt": "x",
+                        "width": 768, "height": 768})
+        assert ok.status_code == 202, ok.text
+        size = post(api, {"workflow_id": "qwen-image-21", "prompt": "x",
+                          "width": 1536, "height": 1536})
         assert size.status_code == 422
         assert size.json()["error"]["code"] == "UNSUPPORTED_SIZE"
 

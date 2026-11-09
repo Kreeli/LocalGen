@@ -7,7 +7,7 @@ tier = "high"
 enabled = true
 template_sha256 = "0a992fbb7e38b569657cf9c4ab8bffee7362f1f43c87df2f450bcef82cb6a5d6"
 default_size = [1024, 1024]
-verified_sizes = [[1024, 1024]]
+verified_sizes = [[1024, 1024], [768, 768], [1024, 768], [768, 1024], [1152, 896]]
 output_node = "2"
 models = [
   ["1", "diffusion_model", "qwen_image_2.1-Q4_K.gguf"],

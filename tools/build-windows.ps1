@@ -36,9 +36,18 @@ try {
     # 但它可能还留着 PyInstaller 那次的值；而 `& $python` 之后要立刻取，中间不能插
     # 别的原生命令。这里显式接住退出码，避免误判。
     $exe = Join-Path $bundle 'LocalGen.exe'
+    # PyInstaller 退出后 exe 的写盘仍可能有尾延迟：立即校验读到过半写状态，
+    # 出现与源码无关的字节码差异（如 PUSH_NULL vs LOAD_CONST）。失败先等 5s
+    # 重试一次，仍失败才判定真差异（两次都稳定 DIFF 才 throw）。
     $LASTEXITCODE = 0
     & $python (Join-Path $root 'tools\verify_packed.py') $exe
     $verifyCode = $LASTEXITCODE
+    if ($verifyCode -ne 0) {
+        Start-Sleep -Seconds 5
+        $LASTEXITCODE = 0
+        & $python (Join-Path $root 'tools\verify_packed.py') $exe
+        $verifyCode = $LASTEXITCODE
+    }
     if ($verifyCode -ne 0) {
         throw "Packed bytecode does not match src/ (verify_packed exit $verifyCode)."
     }

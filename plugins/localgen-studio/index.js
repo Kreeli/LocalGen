@@ -31,7 +31,7 @@ const ROUTE_RAW = `${PREFIX}/raw`;
 const ROUTE_UPLOAD = `${PREFIX}/upload`;
 
 const DEFAULT_BASE = 'http://127.0.0.1:12138';
-const RECORD_KEY = 'localgen-studio';
+const RECORD_KEY = 'localgen-studio/default';
 const JSON_LIMIT = 2 * 2 ** 20;
 const UPLOAD_LIMIT = 64 * 2 ** 20;
 const RPC_TIMEOUT_MS = 30_000;
@@ -69,41 +69,52 @@ async function writeSettingsFile(patch) {
 
 async function readStored(ctx) {
   const credentials = ctx.get('credentials');
+  let credentialToken;
+  let credentialBase;
   if (credentials) {
     try {
       const record = await credentials.readRecord(RECORD_KEY);
       if (record && record.kind === 'api-key') {
-        const token = typeof record.key === 'string' && record.key.trim() ? record.key.trim() : undefined;
-        const baseUrl = record.env && typeof record.env.LOCALGEN_BASE_URL === 'string'
+        credentialToken = typeof record.key === 'string' && record.key.trim() ? record.key.trim() : undefined;
+        credentialBase = record.env && typeof record.env.LOCALGEN_BASE_URL === 'string'
           ? record.env.LOCALGEN_BASE_URL.trim() || undefined
           : undefined;
-        if (token || baseUrl) return { token, baseUrl, source: 'credentials' };
       }
     } catch {
       // fall through to the file
     }
   }
   const file = await readSettingsFile();
-  return {
-    token: typeof file.token === 'string' && file.token.trim() ? file.token.trim() : undefined,
-    baseUrl: typeof file.baseUrl === 'string' && file.baseUrl.trim() ? file.baseUrl.trim() : undefined,
-    source: 'file',
-  };
+  const fileToken = typeof file.token === 'string' && file.token.trim() ? file.token.trim() : undefined;
+  const fileBase = typeof file.baseUrl === 'string' && file.baseUrl.trim() ? file.baseUrl.trim() : undefined;
+  // Credentials (when present) wins for baseUrl, but a token missing there
+  // falls back to the file so a baseUrl-only update never loses the token.
+  const token = credentialToken || fileToken;
+  const baseUrl = credentialBase || fileBase;
+  return { token, baseUrl, source: (credentialToken || credentialBase) ? 'credentials' : 'file' };
 }
 
 async function writeStored(ctx, { token, baseUrl }) {
+  // An empty string token means "leave unchanged", not "clear": the UI only
+  // sends a non-empty token when the user actually typed one. This prevents a
+  // baseUrl-only edit from wiping a previously stored token.
+  const tokenGiven = typeof token === 'string' && token.trim() !== '';
   const credentials = ctx.get('credentials');
   if (credentials) {
     try {
       await credentials.modifyRecord(RECORD_KEY, async (current) => {
         const env = { ...(current && current.env ? current.env : {}) };
         if (baseUrl !== undefined) env.LOCALGEN_BASE_URL = baseUrl;
-        const key = token !== undefined ? token : (current && typeof current.key === 'string' ? current.key : '');
+        const existingKey = current && typeof current.key === 'string' ? current.key : '';
+        const key = tokenGiven ? token.trim() : existingKey;
         if (!key) return Object.keys(env).length ? { kind: 'api-key', env } : undefined;
         return { kind: 'api-key', key, env };
       });
-      // Keep the file fallback in sync so a profile that loses the service still works.
-      await writeSettingsFile({ ...(baseUrl !== undefined ? { baseUrl } : {}) });
+      // Keep the file fallback in sync (never write an empty token).
+      await writeSettingsFile({
+        ...(baseUrl !== undefined ? { baseUrl } : {}),
+        ...(tokenGiven ? { token: token.trim() } : {}),
+      });
       return 'credentials';
     } catch {
       // fall through to the file
@@ -111,7 +122,7 @@ async function writeStored(ctx, { token, baseUrl }) {
   }
   await writeSettingsFile({
     ...(baseUrl !== undefined ? { baseUrl } : {}),
-    ...(token !== undefined ? { token } : {}),
+    ...(tokenGiven ? { token: token.trim() } : {}),
   });
   return 'file';
 }

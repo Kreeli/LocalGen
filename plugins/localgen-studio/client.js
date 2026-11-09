@@ -411,6 +411,37 @@ window.__ModuleLoader__.load({
     function GeneratePanel({ state, fillRef, onJobsChanged }) {
       const [workflows, setWorkflows] = useState([]);
       const [workflow, setWorkflow] = useState('');
+      const [workflowError, setWorkflowError] = useState('');
+      const [workflowLoading, setWorkflowLoading] = useState(false);
+
+      const loadWorkflows = useCallback(async () => {
+        if (!state || !state.tokenConfigured) return;
+        setWorkflowLoading(true);
+        setWorkflowError('');
+        try {
+          const data = await callApi('/api/v1/workflows');
+          const items = Array.isArray(data.items) ? data.items : [];
+          setWorkflows(items);
+          const ids = items.map((item) => item.workflow_id);
+          if (!ids.length) {
+            setWorkflowError('服务返回了空的工作流列表');
+            return;
+          }
+          setWorkflow((current) => {
+            if (ids.includes(current)) return current;
+            return ids.includes('qwen-image-21') ? 'qwen-image-21' : ids[0];
+          });
+        } catch (failure) {
+          const code = failure.code ? `（${failure.code}）` : '';
+          setWorkflowError(`${failure.message || failure}${code}`);
+        } finally {
+          setWorkflowLoading(false);
+        }
+      }, [state]);
+
+      useEffect(() => {
+        loadWorkflows();
+      }, [loadWorkflows]);
       const [size, setSize] = useState('');
       const [seed, setSeed] = useState('');
       const [negative, setNegative] = useState('');
@@ -431,25 +462,6 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('');
       const [startedAt, setStartedAt] = useState(null);
       const fileRef = useRef(null);
-
-      // workflow list — default to qwen-image-21, fall back to first item
-      useEffect(() => {
-        if (!state || !state.tokenConfigured) return;
-        (async () => {
-          try {
-            const data = await callApi('/api/v1/workflows');
-            const items = Array.isArray(data.items) ? data.items : [];
-            setWorkflows(items);
-            const ids = items.map((item) => item.workflow_id);
-            if (!ids.length) return;
-            if (!ids.includes(workflow)) {
-              setWorkflow(ids.includes('qwen-image-21') ? 'qwen-image-21' : ids[0]);
-            }
-          } catch (failure) {
-            setError(failure.message || String(failure));
-          }
-        })();
-      }, [state]);
 
       const currentWorkflow = workflows.find((item) => item.workflow_id === workflow) || null;
       const sizes = currentWorkflow ? (currentWorkflow.verified_sizes || []).map(([w, h]) => [w, h]) : [];
@@ -639,18 +651,27 @@ window.__ModuleLoader__.load({
           h('div', { className: 'lgs-card' },
             h('h2', null, '模型与参数'),
             h('label', { className: 'lgs-label' }, '工作流'),
-            h('select', { className: 'lgs-select', value: workflow, onChange: (event) => setWorkflow(event.target.value) },
-              workflows.map((item) => h('option', { key: item.workflow_id, value: item.workflow_id },
-                `${item.title}${item.available ? '' : '（不可用）'}`))
-            ),
+            workflowLoading
+              ? h('div', { className: 'lgs-note', style: { padding: '7px 0' } }, '加载工作流…')
+              : h('select', { className: 'lgs-select', value: workflow, onChange: (event) => setWorkflow(event.target.value) },
+                workflows.map((item) => h('option', { key: item.workflow_id, value: item.workflow_id },
+                  `${item.title}${item.available ? '' : '（不可用）'}`))
+              ),
+            workflowError
+              ? h('div', { className: 'lgs-row', style: { marginTop: 6, alignItems: 'center' } },
+                h('div', { className: 'lgs-error', style: { flex: 1 } }, workflowError),
+                h('button', { className: 'lgs-btn', onClick: loadWorkflows }, '重试'))
+              : null,
             currentWorkflow && !currentWorkflow.available
               ? h('div', { className: 'lgs-note lgs-warn', style: { marginTop: 6 } },
                 `不可用：${currentWorkflow.diagnostic_code || '缺少依赖'}`)
               : null,
             h('label', { className: 'lgs-label' }, '尺寸'),
-            h('select', { className: 'lgs-select', value: size, onChange: (event) => setSize(event.target.value) },
-              sizes.map(([w, hh]) => h('option', { key: sizeKey(w, hh), value: sizeKey(w, hh) }, `${w} × ${hh}`))
-            ),
+            sizes.length
+              ? h('select', { className: 'lgs-select', value: size, onChange: (event) => setSize(event.target.value) },
+                sizes.map(([w, hh]) => h('option', { key: sizeKey(w, hh), value: sizeKey(w, hh) }, `${w} × ${hh}`))
+              )
+              : h('div', { className: 'lgs-note', style: { padding: '7px 0' } }, '该工作流没有可用尺寸'),
             h('div', { className: 'lgs-row', style: { marginTop: 10 } },
               h('div', { style: { flex: 1 } },
                 h('label', { className: 'lgs-label' }, '种子'),

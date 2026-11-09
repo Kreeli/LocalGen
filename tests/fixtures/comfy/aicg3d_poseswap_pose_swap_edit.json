@@ -1,0 +1,349 @@
+{
+  "id": "aicg3d-poseswap-full-example",
+  "revision": 1,
+  "last_node_id": 6,
+  "last_link_id": 11,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        440,
+        420
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "title": "Load Image - 你生成的人物参考图",
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "pose_gallery_person_reference.png",
+        "image"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "PoseQwen21PoseSelect",
+      "pos": [
+        520,
+        260
+      ],
+      "size": [
+        360,
+        420
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "pose_image",
+          "type": "IMAGE",
+          "links": [
+            2
+          ]
+        },
+        {
+          "name": "pose_id",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "description",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "AICG3D PoseSwap → 姿势姿态控制",
+      "properties": {
+        "Node name for S&R": "PoseQwen21PoseSelect"
+      },
+      "widgets_values": [
+        "full_sexy_P031_front"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "PoseQwen21",
+      "pos": [
+        0,
+        500
+      ],
+      "size": [
+        380,
+        620
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "person_image",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "name": "pose_image",
+          "type": "IMAGE",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            3
+          ]
+        },
+        {
+          "name": "description",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "AICG3D PoseSwap → Qwen2.1 姿态换姿生成",
+      "properties": {
+        "Node name for S&R": "PoseQwen21"
+      },
+      "widgets_values": [
+        "Reproduce the EXACT pose, limb angles, body orientation and camera viewpoint shown in Picture 1. Picture 1 is the only source for pose and body placement. Picture 2 is the only source for the person's identity and complete outfit: keep the EXACT same person, face, hairstyle, body proportions, top, bottom, legwear, footwear, colors, fabric, patterns and accessories, background and lighting as in Picture 2. If Picture 2 is barefoot, keep bare feet. If Picture 2 has socks or tights without shoes, keep exactly those and add no shoes. If Picture 2 has shoes, keep exactly those shoes. Never invent shoes, socks, boots, extra clothing or accessories that are not visible in Picture 2. Do NOT alter, replace, remove, recolor or redraw the outfit from Picture 2. Do not copy the line drawing, mannequin shape or any annotations from Picture 1.",
+        "",
+        "qwen/qwen_image_2.1_bf16.safetensors",
+        "qwen3vl_8b_bf16.safetensors",
+        "qwen_image_2.1_vae_bf16.safetensors",
+        "qwen-image2.1/VNCCS_QI2_PoseStudioV1.1.safetensors",
+        1.0,
+        1024,
+        20261029,
+        25,
+        1.0,
+        "euler",
+        "simple",
+        1.0,
+        "auto",
+        "default"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "PoseQwen21GarmentSelect",
+      "pos": [
+        1060,
+        260
+      ],
+      "size": [
+        340,
+        380
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "garment_image",
+          "type": "IMAGE",
+          "links": [
+            4
+          ]
+        },
+        {
+          "name": "garment_id",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "description",
+          "type": "STRING",
+          "links": [
+            11
+          ]
+        }
+      ],
+      "title": "AICG3D PoseSwap → 服装选择",
+      "properties": {
+        "Node name for S&R": "PoseQwen21GarmentSelect"
+      },
+      "widgets_values": [
+        "SPR-0001"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "PoseQwen21PoseSwap",
+      "pos": [
+        560,
+        560
+      ],
+      "size": [
+        420,
+        680
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "person_image",
+          "type": "IMAGE",
+          "link": 3
+        },
+        {
+          "name": "garment_image",
+          "type": "IMAGE",
+          "link": 4
+        },
+        {
+          "localized_name": "garment_description",
+          "name": "garment_description",
+          "type": "STRING",
+          "link": 11
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            5
+          ]
+        },
+        {
+          "name": "description",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "AICG3D PoseSwap → Qwen Edit 2511 换装生成",
+      "properties": {
+        "Node name for S&R": "PoseQwen21PoseSwap"
+      },
+      "widgets_values": [
+        true,
+        "Full-outfit virtual try-on. Edit Picture 1 so the adult woman wears the COMPLETE outfit shown in Picture 2. Picture 2 is the sole and exact reference for every clothing component: top, bottom or skirt, belt, legwear and footwear. Replace the source clothing, socks or tights and shoes with the matching items in Picture 2. If Picture 2 shows different shoes, the original shoes must be completely removed and replaced, not retained or merged. If Picture 2 has no footwear, keep the original footwear exactly. Keep the same identity, face, hairstyle, body proportions, pose, background and lighting. Do not invent extra shoes, accessories or clothing. Preserve garment color, pattern, material, trim, silhouette. Copy the footwear from Picture 2 with its exact color, straps, platform, sole and heel; do not substitute a generic shoe or a different shoe color. Photorealistic, both feet and shoes clearly visible. Output only the final photograph.",
+        "qwen_image_edit_2511_int8_convrot.safetensors",
+        "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "qwen_image_vae.safetensors",
+        "Qwen-Edit-2511/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        1.0,
+        3.1,
+        20261029,
+        4,
+        1.0,
+        "euler",
+        "simple",
+        1.0
+      ]
+    },
+    {
+      "id": 6,
+      "type": "SaveImage",
+      "pos": [
+        1120,
+        580
+      ],
+      "size": [
+        440,
+        420
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        }
+      ],
+      "outputs": [],
+      "title": "Save Image - 换姿+换装结果",
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "images/qwen2.1/poseswap/result"
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      3,
+      0,
+      "IMAGE"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      1,
+      "IMAGE"
+    ],
+    [
+      3,
+      3,
+      0,
+      5,
+      0,
+      "IMAGE"
+    ],
+    [
+      4,
+      4,
+      0,
+      5,
+      1,
+      "IMAGE"
+    ],
+    [
+      5,
+      5,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      11,
+      4,
+      2,
+      5,
+      16,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "workflowName": "AICG3D PoseSwap → Qwen2.1 换姿 + Qwen Edit 2511 换装（独立插件示例）",
+    "frontendVersion": "1.57.4"
+  },
+  "version": 0.4
+}

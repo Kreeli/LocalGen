@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="LocalGen Studio">
+  <defs>
+    <linearGradient id="lgs-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f6feb"/>
+      <stop offset="1" stop-color="#0b3d91"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#lgs-bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="14" y="12" width="36" height="40" rx="6" opacity="0.55"/>
+    <circle cx="32" cy="23" r="4.4"/>
+    <path d="M32 28.4v9.2"/>
+    <path d="M32 37.6l-5.6 7.2"/>
+    <path d="M32 37.6l5.6 7.2"/>
+    <path d="M24 31.2h16"/>
+  </g>
+</svg>

@@ -7,3 +7,15 @@ build/
 dist/
 *.spec
 dsh-image-gen/
+
+# ---- 用户数据与本机产物（不入库） ----
+data/
+dist-next/
+dist-old*/
+*.log
+
+# 第三方素材库：姿势库限制商用、服装库无再分发许可，必须由使用者自行合法取得后
+# 用 tools/import_pose_libraries.py 导入，仓库不携带。
+
+# ---- 并行会话的工作现场 ----
+zcode-workflow/

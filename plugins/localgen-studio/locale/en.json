@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "LocalGen Studio",
+    "description": "Pick poses and garments from the local LocalGen libraries, upload a reference photo, then run a pose-swap or garment-swap generation and follow its progress."
+  }
+}

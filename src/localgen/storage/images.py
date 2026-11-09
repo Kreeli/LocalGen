@@ -11,6 +11,8 @@ from localgen.config import Settings, atomic_write, guarded
 from localgen.jobs.models import AppError
 
 logger = logging.getLogger(__name__)
+# 任务附属物：引擎实际吃到的参考图（裁剪到输出比例后的那一份）。
+REFERENCE_NAME = "reference.png"
 
 
 def uuid_name(value):
@@ -60,12 +62,32 @@ class ImageStore:
                 continue
             try:
                 for path in guarded(folder).iterdir():
-                    if path not in expected[folder]:
+                    # reference.png 是任务附属物（引擎实际吃到的参考图），不是多余文件。
+                    if path not in expected[folder] and path.name != REFERENCE_NAME:
                         self.isolate(path)
             except OSError:
                 self.isolate(folder)
         for path in self.staging.iterdir():
             self.isolate(path)
+
+    def keep_reference(self, job_id):
+        """把引擎真正吃到的那张参考图转存成任务附属物（`results/<job_id>/reference.png`）。
+
+        两个理由：`gateway-input/` 迟早要加 TTL，届时历史里就说不清当初喂了什么；
+        而引擎目录在任务发布后立刻被清理，所以只有这一刻能搬走。
+        """
+        try:
+            job = uuid_name(job_id)
+            source = guarded(self.data / "comfy-output" / job / "input.png")
+            if not source.is_file():
+                return None
+            target = guarded(self.results / job / REFERENCE_NAME)
+            target.parent.mkdir(exist_ok=True)
+            shutil.copyfile(source, target)
+            return target
+        except (OSError, ValueError):
+            logger.warning("REFERENCE_KEEP_FAILED job=%s", job_id)
+            return None
 
     def stage(self, content: bytes, width: int, height: int):
         if not content or len(content) > self.limit:

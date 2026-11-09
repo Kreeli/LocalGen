@@ -192,6 +192,11 @@ class Database:
     def queued_count(self):
         return self.execute("SELECT count(*) FROM jobs WHERE status='queued'").fetchone()[0]
 
+    def queued_head(self):
+        """队头任务 id —— 界面用它说"排第 1"，不用把整个队列拉下来。"""
+        row = self.execute("SELECT job_id FROM jobs WHERE status='queued' ORDER BY seq LIMIT 1").fetchone()
+        return row["job_id"] if row else None
+
     def request_stop(self, job_id):
         self.execute("UPDATE jobs SET status='cancelling' WHERE job_id=? AND status IN ('submitting','running')",
                      job_id)

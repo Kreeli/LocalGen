@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import threading
+import time
 from ctypes import wintypes as w
 from pathlib import Path
 
@@ -108,7 +109,13 @@ class WindowsProcess:
                     stdin = msvcrt.get_osfhandle(null.fileno())
                     os.set_handle_inheritable(stdin, True)
                     self.pid = launch(self.job, (stdin, stdout), command, cwd, env)
-                self.reader = None
+                # 输出落文件（子进程被硬杀也不丢日志），但另起一条 tail 线程把同样的
+                # 行喂给 on_line：sd-cli 的采样进度、ETA 和显存不足判定全靠它，
+                # 少了这条线程进度永远不会进数据库。
+                self.log_path = log_file
+                self.parser = on_line or logger.info
+                self.reader = threading.Thread(target=self.tail, name="LocalGen engine tail",
+                                               daemon=True)
             else:
                 reader, writer = win32pipe.CreatePipe(None, 0)
                 try:
@@ -137,6 +144,19 @@ class WindowsProcess:
             raise
 
     @staticmethod
+    def feed(pending, chunk, on_line):
+        """Split one raw chunk into lines and hand each non-empty line to on_line."""
+        lines = (pending + chunk).replace(b"\r", b"\n").split(b"\n")
+        pending = lines.pop()
+        if len(pending) > 4096:
+            lines.append(pending[:4096])
+            pending = b""
+        for line in lines:
+            if line:
+                on_line(line[:4096].decode("utf-8", errors="replace"))
+        return pending
+
+    @staticmethod
     def drain(handle, on_line):
         import pywintypes
         import win32file
@@ -147,14 +167,7 @@ class WindowsProcess:
                 _, chunk = win32file.ReadFile(handle, 4096)
                 if not chunk:
                     break
-                lines = (pending + chunk).replace(b"\r", b"\n").split(b"\n")
-                pending = lines.pop()
-                if len(pending) > 4096:
-                    lines.append(pending[:4096])
-                    pending = b""
-                for line in lines:
-                    if line:
-                        on_line(line[:4096].decode("utf-8", errors="replace"))
+                pending = WindowsProcess.feed(pending, chunk, on_line)
         except pywintypes.error as exc:
             if exc.winerror not in (109, 232):
                 logger.warning("ENGINE_LOG_PIPE error=%s", exc.winerror)
@@ -163,10 +176,47 @@ class WindowsProcess:
                 on_line(pending.decode("utf-8", errors="replace"))
             handle.Close()
 
+    def tail(self):
+        """Follow the file-backed stdout and replay it into on_line.
+
+        A reader on a plain file returns EOF at the current end, so this polls;
+        it keeps draining briefly after the child exits to flush the tail.
+        """
+        pending = b""
+        idle = 0
+        try:
+            with open(self.log_path, "rb", buffering=0) as stream:
+                while True:
+                    chunk = stream.read(4096)
+                    if chunk:
+                        idle = 0
+                        pending = self.feed(pending, chunk, self.parser)
+                        continue
+                    if self.running():
+                        idle = 0
+                    else:
+                        idle += 1
+                        if idle >= 8:
+                            break
+                    time.sleep(0.15)
+        except Exception as exc:  # 读日志失败不能影响任务本身
+            logger.warning("ENGINE_LOG_TAIL error=%s", exc)
+        if pending:
+            self.parser(pending.decode("utf-8", errors="replace"))
+
     def alive(self):
         import win32event
 
         return win32event.WaitForSingleObject(self.process, 0) == win32event.WAIT_TIMEOUT
+
+    def running(self):
+        """alive() that tolerates a half-built process (used by the log tail)."""
+        if getattr(self, "process", None) is None:
+            return True
+        try:
+            return self.alive()
+        except Exception:
+            return False
 
     def exit_code(self):
         import win32process

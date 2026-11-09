@@ -126,9 +126,10 @@ class Scheduler:
                 except (httpx.HTTPError, TimeoutError):
                     await self.pause()
                     continue
-                if result.progress:
-                    self.db.progress(job_id, Progress(stage="sampling", current=result.progress[0],
-                                                       total=result.progress[1]))
+                if result.progress or result.detail:
+                    current, total = result.progress or (None, None)
+                    self.db.progress(job_id, Progress(stage=result.stage, current=current,
+                                                      total=total, detail=result.detail))
                 if result.image is not None:
                     if self.stopping(job_id):
                         await self.stop_task(job_id, prompt_id)
@@ -139,6 +140,9 @@ class Scheduler:
                     elif time.monotonic() >= deadline:
                         await self.stop_task(job_id, prompt_id, self.error("JOB_TIMEOUT", "任务超时"))
                     elif self.images.publish(self.db, job_id, artifact_id, staged, width, height):
+                        # 发布成功、引擎目录即将被清理 —— 趁现在把参考图转存成任务附属物。
+                        if parameters.get("image"):
+                            await asyncio.to_thread(self.images.keep_reference, job_id)
                         self.engine.cleanup(job_id)
                     return
                 await self.pause()

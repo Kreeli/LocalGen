@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import shutil
+from datetime import UTC, datetime
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -38,7 +39,11 @@ class JobService:
             "workflow_id": spec.workflow_id, "revision": spec.revision, "title": spec.title,
             "available": reason is None, "diagnostic_code": reason, "missing_dependencies": missing,
             "verified_sizes": spec.verified_sizes, "default_size": spec.default_size,
-            "supported_parameters": sorted(set(spec.inputs) - {"output_prefix"}), "resource_tier": spec.tier,
+            "supported_parameters": sorted(set(spec.inputs) - {"output_prefix"}),
+            "required_parameters": sorted(spec.required_inputs),
+            "default_strength": workflow.input_default("strength"),
+            "resource_tier": spec.tier,
+            "engine_parameters": workflow.engine_parameters(),
         }
 
     def list_workflows(self):
@@ -104,6 +109,42 @@ class JobService:
     def progress(self):
         row = self.db.active_row()
         return {"job": self.db.job(row) if row is not None else None, "queued": self.db.queued_count()}
+
+    def status(self):
+        """一条接口回答"现在在干嘛、我排第几"（桌面每 1.1 s 只轮询这一个）。
+
+        与 `/progress` 的区别：那个返回整条 job（大），这个只给摘要，并把排队位次、
+        已用时算好 —— 界面不用自己算，也不用一次拉三张表。
+        """
+        row = self.db.active_row()
+        active = self.db.job(row) if row is not None else None
+        queued = self.db.queued_count()
+        payload = {"active_job": None, "workflow_id": None, "queue_length": queued,
+                   "position": None, "stage": None, "elapsed_s": None, "queued_job_id": None}
+        if active is not None:
+            progress = active.progress
+            started = active.started_at
+            elapsed = None
+            if started:
+                try:
+                    elapsed = max(0, int((datetime.now(UTC)
+                                          - datetime.fromisoformat(started)).total_seconds()))
+                except ValueError:
+                    elapsed = None
+            payload.update({
+                "active_job": active.job_id,
+                "workflow_id": active.workflow_id,
+                "position": 0,                      # 正在跑 = 第 0 位
+                "stage": progress.stage if progress else None,
+                "elapsed_s": elapsed,
+            })
+        else:
+            # 没在跑但队列里有活：把队头报出来，界面才能说"排第 1"。
+            head = self.db.queued_head()
+            if head is not None:
+                payload["queued_job_id"] = head
+                payload["position"] = 1
+        return payload
 
     def artifact(self, job_id, artifact_id):
         return self.images.download(self.db, job_id, artifact_id)

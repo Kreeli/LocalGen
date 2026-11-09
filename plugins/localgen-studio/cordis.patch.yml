@@ -1,0 +1,4 @@
+# localgen-studio bundle patch: inserts the panel plugin into a profile's layer stack.
+- insert:
+    - id: localgen-studio
+      name: 'localgen-studio'

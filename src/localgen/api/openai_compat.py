@@ -9,11 +9,13 @@ and answers with base64 image data.
 import asyncio
 import base64
 import io
+import json
 import time
 import uuid as uuidlib
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 from fastapi.responses import JSONResponse
 from PIL import Image
 
@@ -103,6 +105,53 @@ def _finished_b64(service, job) -> dict:
     return {"created": int(time.time()), "data": [{"b64_json": encoded}]}
 
 
+HEARTBEAT = b"\n"
+HEARTBEAT_SECONDS = 20.0
+
+
+async def _streamed_job(service, submission) -> StreamingResponse:
+    """Run one job with headers sent immediately, then newline keep-alives.
+
+    Local generations take 3–9 minutes on this hardware. OpenAI-ecosystem
+    clients run on Node's undici, whose default headersTimeout (300 s) aborts
+    any response whose headers have not arrived — a synchronous JSON reply
+    always loses that race. Streaming sends the headers at once and keeps the
+    body alive with newlines (JSON.parse ignores leading whitespace), so any
+    job length survives; the final chunk is the same JSON as before.
+    """
+    job = service.submit(submission)
+    job_id = str(job.job_id)
+    timeout = service.settings.job_timeout
+
+    async def generator():
+        deadline = time.monotonic() + timeout
+        last_beat = time.monotonic()
+        while True:
+            current = service.get_job(job_id)
+            if current.status in TERMINAL:
+                try:
+                    payload = _finished_b64(service, current)
+                except AppError as exc:
+                    payload = json.loads(_oai_error(exc.status, exc.detail.message,
+                                                    exc.detail.code).body.decode())
+                yield json.dumps(payload).encode()
+                return
+            if time.monotonic() - last_beat >= HEARTBEAT_SECONDS:
+                yield HEARTBEAT
+                last_beat = time.monotonic()
+            if time.monotonic() >= deadline:
+                payload = json.loads(_oai_error(
+                    504, f"任务 {job_id} 在 {timeout} 秒内未完成；它仍在队列中，可稍后在历史里取图",
+                    "GATEWAY_TIMEOUT").body.decode())
+                yield json.dumps(payload).encode()
+                return
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(generator(), media_type="application/json",
+                             headers={"X-Accel-Buffering": "no",
+                                      "Cache-Control": "no-store"})
+
+
 @router.get("/models")
 async def models(request: Request):
     service = _service(request)
@@ -135,8 +184,7 @@ async def generations(request: Request):
                                 seed=body.get("seed") if isinstance(body.get("seed"), int) else None,
                                 negative_prompt=negative if isinstance(negative, str) else None)
         job = service.submit(submission)
-        finished = await _wait_for_job(service, str(job.job_id), service.settings.job_timeout)
-        return _finished_b64(service, finished)
+        return await _streamed_job(service, submission)
     except AppError as exc:
         return _oai_error(exc.status, exc.detail.message, exc.detail.code)
     except Exception:
@@ -176,8 +224,7 @@ async def edits(request: Request):
         submission = Submission(workflow_id=workflow.spec.workflow_id, prompt=prompt,
                                 width=width, height=height, image=token, strength=strength)
         job = service.submit(submission)
-        finished = await _wait_for_job(service, str(job.job_id), service.settings.job_timeout)
-        return _finished_b64(service, finished)
+        return await _streamed_job(service, submission)
     except AppError as exc:
         return _oai_error(exc.status, exc.detail.message, exc.detail.code)
     except Exception:

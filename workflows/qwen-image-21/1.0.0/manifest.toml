@@ -1,0 +1,26 @@
+workflow_id = "qwen-image-21"
+revision = "1.0.0"
+title = "Qwen-Image-2.1 · GGUF"
+engine = "comfy"
+runner = "sdcpp"
+tier = "high"
+enabled = true
+template_sha256 = "0a992fbb7e38b569657cf9c4ab8bffee7362f1f43c87df2f450bcef82cb6a5d6"
+default_size = [1024, 1024]
+verified_sizes = [[1024, 1024]]
+output_node = "2"
+models = [
+  ["1", "diffusion_model", "qwen_image_2.1-Q4_K.gguf"],
+  ["1", "text_encoder", "Qwen3VL-8B-Instruct-Q4_K_M.gguf"],
+  ["1", "vision_encoder", "mmproj-Qwen3VL-8B-Instruct-F16.gguf"],
+  ["1", "vae", "qwen_image_2.1_vae_bf16.safetensors"],
+]
+
+[inputs]
+prompt = ["1", "prompt"]
+negative_prompt = ["1", "negative_prompt"]
+image = ["1", "image"]
+width = ["1", "width"]
+height = ["1", "height"]
+seed = ["1", "seed"]
+output_prefix = ["2", "filename_prefix"]

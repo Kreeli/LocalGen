@@ -14,12 +14,14 @@ from localgen.config import guarded, resources
 from localgen.engine import EngineStatus
 from localgen.engine.comfy import ComfyEngine, previous_engine_exited
 from localgen.engine.mock import MockEngine
+from localgen.jobs.edit import EditRequest, choose_engine, to_submission
 from localgen.jobs.models import AppError, Job, JobPage, JobQuery, Submission, validation_error
 from localgen.jobs.scheduler import Scheduler
 from localgen.jobs.service import JobService
 from localgen.mcp import build_mcp
 from localgen.storage.database import Database
 from localgen.storage.images import ImageStore
+from localgen.storage.libraries import KINDS, LibraryStore
 
 from localgen.api.gateway import router as gateway_router
 from localgen.api.openai_compat import router as openai_router, stage_image
@@ -131,6 +133,35 @@ def make_app(data, settings, token, *, engine=None, workflow_root=None):
         response.headers["Location"] = f"/api/v1/jobs/{job.job_id}"
         return job
 
+    @router.post("/edit", status_code=202)
+    async def edit(request: EditRequest, response: Response,
+                   idempotency_key: Annotated[str | None, Header()] = None):
+        """语义化编辑入口：只给意图，模型分派由后端负责（见 jobs/edit.py）。"""
+        try:
+            workflow_id, reason = choose_engine(request)
+        except AppError as exc:
+            return failure(exc)
+        try:
+            submission = to_submission(request, service().registry)
+        except AppError as exc:
+            return failure(exc)
+        logger.info("EDIT_ROUTED workflow=%s engine=%s reason=%s",
+                    workflow_id, request.engine, reason)
+        try:
+            job = service().submit(submission, idempotency_key)
+        except AppError as exc:
+            # 路由成功但引擎没准备好时，把路由结果一并带回：
+            # 调用方能看出"选对了模型，只是引擎不可用"，而不是以为参数被拒。
+            detail = exc.detail.model_dump()
+            detail["routed_to"] = workflow_id
+            detail["route_reason"] = reason
+            return JSONResponse({"error": detail}, status_code=exc.status)
+        response.headers["Location"] = f"/api/v1/jobs/{job.job_id}"
+        body = job.model_dump()
+        body["routed_to"] = workflow_id
+        body["route_reason"] = reason
+        return body
+
     @router.get("/jobs", response_model=JobPage)
     async def jobs(query: Annotated[JobQuery, Query()]):
         return service().list_jobs(query)
@@ -138,6 +169,10 @@ def make_app(data, settings, token, *, engine=None, workflow_root=None):
     @router.get("/progress")
     async def progress():
         return service().progress()
+
+    @router.get("/status")
+    async def status():
+        return service().status()
 
     @router.delete("/jobs/{job_id}", status_code=204)
     async def delete_job(job_id: UUID):
@@ -175,6 +210,61 @@ def make_app(data, settings, token, *, engine=None, workflow_root=None):
         return FileResponse(file, media_type="image/png", filename=f"LocalGen-{job_id}.png",
                             content_disposition_type="inline", headers={"Cache-Control": "no-store",
                                                                         "X-Content-Type-Options": "nosniff"})
+
+    # ---------- 姿势 / 服装图库 ----------
+    # 图库是只读素材，选中后作为参考图参与生成；这里只提供查询与出图。
+
+    def libraries():
+        store = getattr(app.state, "libraries", None)
+        if store is None:
+            store = LibraryStore(app.state.data)
+            app.state.libraries = store
+        return store
+
+    @router.get("/libraries")
+    async def library_list():
+        store = libraries()
+        return {kind: {"installed": store.installed(kind),
+                       "count": store.index(kind)["count"] if store.installed(kind) else 0}
+                for kind in KINDS}
+
+    @router.get("/libraries/{kind}")
+    async def library_catalog(kind: str, query: str = "", category: str = "",
+                              collection: str = "", limit: int = 60, offset: int = 0):
+        try:
+            return libraries().catalog(kind, query=query, category=category,
+                                       collection=collection,
+                                       limit=max(1, min(limit, 200)), offset=max(0, offset))
+        except AppError as exc:
+            return failure(exc)
+
+    @router.get("/libraries/{kind}/{item_id}")
+    async def library_entry(kind: str, item_id: str):
+        try:
+            return libraries().entry(kind, item_id)
+        except AppError as exc:
+            return failure(exc)
+
+    def asset_headers():
+        # 图库是静态素材，可以放心缓存；still no sniff。
+        return {"Cache-Control": "private, max-age=86400",
+                "X-Content-Type-Options": "nosniff"}
+
+    @router.get("/libraries/{kind}/{item_id}/image")
+    async def library_image(kind: str, item_id: str):
+        try:
+            path, media = libraries().image(kind, item_id)
+            return FileResponse(path, media_type=media, headers=asset_headers())
+        except AppError as exc:
+            return failure(exc)
+
+    @router.get("/libraries/{kind}/{item_id}/thumb")
+    async def library_thumb(kind: str, item_id: str):
+        try:
+            path, media = libraries().thumb(kind, item_id)
+            return FileResponse(path, media_type=media, headers=asset_headers())
+        except AppError as exc:
+            return failure(exc)
 
     app.include_router(router)
     app.include_router(gateway_router)

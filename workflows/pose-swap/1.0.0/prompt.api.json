@@ -1,0 +1,35 @@
+{
+ "1": {
+  "class_type": "LocalGenPoseSwap",
+  "inputs": {
+   "diffusion_model": "qwen_image_2.1-Q4_K.gguf",
+   "text_encoder": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+   "vision_encoder": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+   "vae": "qwen_image_2.1_vae_bf16.safetensors",
+   "prompt": "",
+   "negative_prompt": "",
+   "image": "",
+   "pose_id": "",
+   "garment_id": "",
+   "width": 768,
+   "height": 768,
+   "seed": 0,
+   "steps": 8,
+   "cfg_scale": 4,
+   "sampling_method": "euler",
+   "sigmas": "qwen-image-2.1-turbo",
+   "lora_model_dir": "loras",
+   "lora_apply_mode": "auto"
+  }
+ },
+ "2": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "filename_prefix": "image",
+   "images": [
+    "1",
+    0
+   ]
+  }
+ }
+}

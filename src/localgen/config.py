@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 def resources() -> Path:
@@ -33,7 +33,7 @@ class Settings(BaseModel):
     engine_python: str = Field("", max_length=4096)
     engine_device: int = Field(0, ge=0, le=15)
     startup_timeout: int = Field(120, ge=5, le=600)
-    job_timeout: int = Field(600, ge=1, le=3600)
+    job_timeout: int = Field(1200, ge=1, le=3600)
     cancel_timeout: int = Field(15, ge=1, le=60)
     request_timeout: int = Field(8, ge=1, le=30)
     queue_limit: int = Field(20, ge=1, le=100)
@@ -87,7 +87,24 @@ def load_settings(data: Path) -> Settings:
     path = guarded(data / "config.toml")
     if not path.exists():
         atomic_write(path, (resources() / "config" / "default.toml").read_bytes())
-    return Settings.model_validate(tomllib.loads(path.read_text("utf-8")))
+    # utf-8-sig：用户拿记事本 / VS Code / PowerShell 5.1 手改这个文件时几乎一定
+    # 留下 BOM，而 tomllib 会把 BOM 当成非法语句 → 打包版没有控制台，表现是
+    # "双击没反应"。带 BOM 与不带 BOM 在 utf-8-sig 下都能读。
+    try:
+        return Settings.model_validate(tomllib.loads(path.read_text("utf-8-sig")))
+    except tomllib.TOMLDecodeError as exc:
+        # 原始报错是 "Invalid statement (at line 1, column 1)"，既不说是哪个文件，
+        # 也不说怎么修 —— 摆到用户面前等于没说。这里补上路径与两条最常见原因。
+        raise ValueError(
+            f"配置文件无法解析：{path}\n"
+            f"{exc}\n\n"
+            "常见原因：\n"
+            "  1. 文件开头有不可见的 BOM（记事本 / PowerShell 5.1 保存时会加）；\n"
+            "  2. 手改时漏了引号、或把 true 写成了 True。\n"
+            "处理办法：用 VS Code 另存为「UTF-8（无 BOM）」，或直接删掉这个文件让程序重建。"
+        ) from None
+    except ValidationError as exc:
+        raise ValueError(f"配置文件里的取值不合法：{path}\n{exc}") from None
 
 
 def save_settings(data: Path, settings: Settings) -> None:

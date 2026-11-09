@@ -1,0 +1,1855 @@
+{
+  "id": "aicg3d-qwen21-subgraph-replace",
+  "revision": 1,
+  "last_node_id": 5,
+  "last_link_id": 8,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "11111111-1111-4111-8111-111111111111",
+      "pos": [
+        0,
+        90
+      ],
+      "size": [
+        440,
+        650
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "人物底图",
+          "type": "IMAGE",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "换头像参考",
+          "type": "IMAGE",
+          "links": [
+            2
+          ]
+        },
+        {
+          "name": "换姿势参考",
+          "type": "IMAGE",
+          "links": [
+            3
+          ]
+        },
+        {
+          "name": "换服饰参考",
+          "type": "IMAGE",
+          "links": [
+            4
+          ]
+        },
+        {
+          "name": "服饰描述",
+          "type": "STRING",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "previewExposures": []
+      },
+      "title": "素材输入 · 四合一",
+      "widgets_values": []
+    },
+    {
+      "id": 2,
+      "type": "22222222-2222-4222-8222-222222222222",
+      "pos": [
+        520,
+        40
+      ],
+      "size": [
+        600,
+        760
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "人物底图",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "name": "换头像参考",
+          "type": "IMAGE",
+          "link": 2
+        },
+        {
+          "name": "换姿势参考",
+          "type": "IMAGE",
+          "link": 3
+        },
+        {
+          "name": "换服饰参考",
+          "type": "IMAGE",
+          "link": 4
+        },
+        {
+          "name": "服饰描述",
+          "type": "STRING",
+          "link": 5
+        },
+        {
+          "name": "换头像开关",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "换头像开关"
+          },
+          "link": null
+        },
+        {
+          "name": "换姿势开关",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "换姿势开关"
+          },
+          "link": null
+        },
+        {
+          "name": "换服饰开关",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "换服饰开关"
+          },
+          "link": null
+        },
+        {
+          "name": "自定义宽度",
+          "type": "INT",
+          "widget": {
+            "name": "自定义宽度"
+          },
+          "link": null
+        },
+        {
+          "name": "自定义高度",
+          "type": "INT",
+          "widget": {
+            "name": "自定义高度"
+          },
+          "link": null
+        },
+        {
+          "name": "换服饰步数",
+          "type": "INT",
+          "widget": {
+            "name": "换服饰步数"
+          },
+          "link": null
+        },
+        {
+          "name": "采样器",
+          "type": "COMBO",
+          "widget": {
+            "name": "采样器"
+          },
+          "link": null
+        },
+        {
+          "name": "调度器",
+          "type": "COMBO",
+          "widget": {
+            "name": "调度器"
+          },
+          "link": null
+        },
+        {
+          "name": "随机种",
+          "type": "INT",
+          "widget": {
+            "name": "随机种"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "换头像结果",
+          "type": "IMAGE",
+          "links": [
+            6
+          ]
+        },
+        {
+          "name": "换姿势结果",
+          "type": "IMAGE",
+          "links": [
+            7
+          ]
+        },
+        {
+          "name": "换服饰结果",
+          "type": "IMAGE",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "previewExposures": []
+      },
+      "title": "一键替换 · 头像 → 姿势 → 服饰",
+      "widgets_values": [
+        true,
+        true,
+        true,
+        0,
+        0,
+        20,
+        "euler",
+        "simple",
+        20261101
+      ]
+    },
+    {
+      "id": 3,
+      "type": "PreviewImage",
+      "pos": [
+        1180,
+        40
+      ],
+      "size": [
+        420,
+        330
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "title": "预览 1 · 换头像"
+    },
+    {
+      "id": 4,
+      "type": "PreviewImage",
+      "pos": [
+        1180,
+        390
+      ],
+      "size": [
+        420,
+        330
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "title": "预览 2 · 换姿势"
+    },
+    {
+      "id": 5,
+      "type": "PreviewImage",
+      "pos": [
+        1180,
+        740
+      ],
+      "size": [
+        420,
+        330
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "title": "预览 3 · 换服饰"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "IMAGE"
+    ],
+    [
+      2,
+      1,
+      1,
+      2,
+      1,
+      "IMAGE"
+    ],
+    [
+      3,
+      1,
+      2,
+      2,
+      2,
+      "IMAGE"
+    ],
+    [
+      4,
+      1,
+      3,
+      2,
+      3,
+      "IMAGE"
+    ],
+    [
+      5,
+      1,
+      4,
+      2,
+      4,
+      "STRING"
+    ],
+    [
+      6,
+      2,
+      0,
+      3,
+      0,
+      "IMAGE"
+    ],
+    [
+      7,
+      2,
+      1,
+      4,
+      0,
+      "IMAGE"
+    ],
+    [
+      8,
+      2,
+      2,
+      5,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "definitions": {
+    "subgraphs": [
+      {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "version": 1,
+        "state": {
+          "lastGroupId": 0,
+          "lastNodeId": 4,
+          "lastLinkId": 5,
+          "lastRerouteId": 0
+        },
+        "revision": 0,
+        "config": {},
+        "name": "AICG3D · 素材输入四合一",
+        "inputNode": {
+          "id": -10,
+          "bounding": [
+            -300,
+            0,
+            110,
+            68
+          ]
+        },
+        "outputNode": {
+          "id": -20,
+          "bounding": [
+            1180,
+            0,
+            140,
+            300
+          ]
+        },
+        "inputs": [],
+        "outputs": [
+          {
+            "id": "044318b1-a712-4067-9bac-ab8536036c0c",
+            "name": "人物底图",
+            "type": "IMAGE",
+            "linkIds": [
+              1
+            ],
+            "pos": [
+              1150,
+              40
+            ]
+          },
+          {
+            "id": "4015b8c4-9168-43b5-9e83-e237cf698f1e",
+            "name": "换头像参考",
+            "type": "IMAGE",
+            "linkIds": [
+              2
+            ],
+            "pos": [
+              1150,
+              100
+            ]
+          },
+          {
+            "id": "0f72af94-9ba9-4be2-b33e-e021a3391ecf",
+            "name": "换姿势参考",
+            "type": "IMAGE",
+            "linkIds": [
+              3
+            ],
+            "pos": [
+              1150,
+              160
+            ]
+          },
+          {
+            "id": "62de6a11-e1e9-49c3-8fc2-124f79372152",
+            "name": "换服饰参考",
+            "type": "IMAGE",
+            "linkIds": [
+              4
+            ],
+            "pos": [
+              1150,
+              220
+            ]
+          },
+          {
+            "id": "8eb14db6-449a-4ffe-ab76-0e494c1250cb",
+            "name": "服饰描述",
+            "type": "STRING",
+            "linkIds": [
+              5
+            ],
+            "pos": [
+              1150,
+              280
+            ]
+          }
+        ],
+        "widgets": [],
+        "nodes": [
+          {
+            "id": 1,
+            "type": "LoadImage",
+            "pos": [
+              0,
+              120
+            ],
+            "size": [
+              320,
+              480
+            ],
+            "flags": {},
+            "order": 0,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "image",
+                "type": "COMBO",
+                "widget": {
+                  "name": "image"
+                },
+                "link": null
+              },
+              {
+                "name": "upload",
+                "type": "IMAGEUPLOAD",
+                "widget": {
+                  "name": "upload"
+                },
+                "link": null
+              }
+            ],
+            "outputs": [
+              {
+                "name": "IMAGE",
+                "type": "IMAGE",
+                "links": [
+                  1
+                ]
+              },
+              {
+                "name": "MASK",
+                "type": "MASK",
+                "links": null
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "LoadImage"
+            },
+            "title": "人物底图",
+            "widgets_values": [
+              "Qwen_image_2.1_00035.png",
+              "image"
+            ]
+          },
+          {
+            "id": 2,
+            "type": "PoseQwen21PortraitSelect",
+            "pos": [
+              340,
+              40
+            ],
+            "size": [
+              310,
+              500
+            ],
+            "flags": {},
+            "order": 1,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "portrait_id",
+                "type": "STRING",
+                "widget": {
+                  "name": "portrait_id"
+                },
+                "link": null
+              }
+            ],
+            "outputs": [
+              {
+                "name": "portrait_image",
+                "type": "IMAGE",
+                "links": [
+                  2
+                ]
+              },
+              {
+                "name": "portrait_id",
+                "type": "STRING",
+                "links": null
+              },
+              {
+                "name": "description",
+                "type": "STRING",
+                "links": null
+              },
+              {
+                "name": "attribution",
+                "type": "STRING",
+                "links": null
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "PoseQwen21PortraitSelect"
+            },
+            "title": "换头像参考",
+            "widgets_values": [
+              "f71f980dde3",
+              null,
+              ""
+            ]
+          },
+          {
+            "id": 3,
+            "type": "PoseQwen21PoseSelect",
+            "pos": [
+              680,
+              40
+            ],
+            "size": [
+              280,
+              560
+            ],
+            "flags": {},
+            "order": 2,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "pose_id",
+                "type": "STRING",
+                "widget": {
+                  "name": "pose_id"
+                },
+                "link": null
+              }
+            ],
+            "outputs": [
+              {
+                "name": "pose_image",
+                "type": "IMAGE",
+                "links": [
+                  3
+                ]
+              },
+              {
+                "name": "pose_id",
+                "type": "STRING",
+                "links": null
+              },
+              {
+                "name": "description",
+                "type": "STRING",
+                "links": null
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "PoseQwen21PoseSelect"
+            },
+            "title": "换姿势参考",
+            "widgets_values": [
+              "full_sexy_P002_front",
+              null,
+              ""
+            ]
+          },
+          {
+            "id": 4,
+            "type": "PoseQwen21GarmentSelect",
+            "pos": [
+              1010,
+              40
+            ],
+            "size": [
+              310,
+              570
+            ],
+            "flags": {},
+            "order": 3,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "garment_id",
+                "type": "STRING",
+                "widget": {
+                  "name": "garment_id"
+                },
+                "link": null
+              }
+            ],
+            "outputs": [
+              {
+                "name": "garment_image",
+                "type": "IMAGE",
+                "links": [
+                  4
+                ]
+              },
+              {
+                "name": "garment_id",
+                "type": "STRING",
+                "links": null
+              },
+              {
+                "name": "description",
+                "type": "STRING",
+                "links": [
+                  5
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "PoseQwen21GarmentSelect"
+            },
+            "title": "换服饰参考",
+            "widgets_values": [
+              "SXY-0061",
+              null,
+              ""
+            ]
+          }
+        ],
+        "groups": [],
+        "links": [
+          {
+            "id": 1,
+            "origin_id": 1,
+            "origin_slot": 0,
+            "target_id": -20,
+            "target_slot": 0,
+            "type": "IMAGE"
+          },
+          {
+            "id": 2,
+            "origin_id": 2,
+            "origin_slot": 0,
+            "target_id": -20,
+            "target_slot": 1,
+            "type": "IMAGE"
+          },
+          {
+            "id": 3,
+            "origin_id": 3,
+            "origin_slot": 0,
+            "target_id": -20,
+            "target_slot": 2,
+            "type": "IMAGE"
+          },
+          {
+            "id": 4,
+            "origin_id": 4,
+            "origin_slot": 0,
+            "target_id": -20,
+            "target_slot": 3,
+            "type": "IMAGE"
+          },
+          {
+            "id": 5,
+            "origin_id": 4,
+            "origin_slot": 2,
+            "target_id": -20,
+            "target_slot": 4,
+            "type": "STRING"
+          }
+        ],
+        "extra": {}
+      },
+      {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "version": 1,
+        "state": {
+          "lastGroupId": 0,
+          "lastNodeId": 9,
+          "lastLinkId": 134,
+          "lastRerouteId": 0
+        },
+        "revision": 0,
+        "config": {},
+        "name": "AICG3D · 一键替换（头像 → 姿势 → 服饰）",
+        "inputNode": {
+          "id": -10,
+          "bounding": [
+            -700,
+            0,
+            140,
+            520
+          ]
+        },
+        "outputNode": {
+          "id": -20,
+          "bounding": [
+            1460,
+            0,
+            140,
+            260
+          ]
+        },
+        "inputs": [
+          {
+            "id": "316985ec-03e9-44a2-b010-7c840117e115",
+            "name": "人物底图",
+            "type": "IMAGE",
+            "linkIds": [
+              100
+            ],
+            "pos": [
+              -650,
+              40
+            ]
+          },
+          {
+            "id": "b67b5452-51a7-4ab4-9501-2d1469383150",
+            "name": "换头像参考",
+            "type": "IMAGE",
+            "linkIds": [
+              101
+            ],
+            "pos": [
+              -650,
+              74
+            ]
+          },
+          {
+            "id": "071fa526-e380-476c-9c7c-737fe79104a1",
+            "name": "换姿势参考",
+            "type": "IMAGE",
+            "linkIds": [
+              102
+            ],
+            "pos": [
+              -650,
+              108
+            ]
+          },
+          {
+            "id": "49e4454d-21c3-422f-a406-6354ccc68231",
+            "name": "换服饰参考",
+            "type": "IMAGE",
+            "linkIds": [
+              103
+            ],
+            "pos": [
+              -650,
+              142
+            ]
+          },
+          {
+            "id": "fb902ef0-bce3-41ac-9136-ea3e68a07475",
+            "name": "服饰描述",
+            "type": "STRING",
+            "linkIds": [
+              104
+            ],
+            "pos": [
+              -650,
+              176
+            ],
+            "forceInput": true
+          },
+          {
+            "id": "c7102f98-5478-41cd-b885-4ac753e6b4ee",
+            "name": "换头像开关",
+            "type": "BOOLEAN",
+            "linkIds": [
+              105
+            ],
+            "pos": [
+              -650,
+              210
+            ]
+          },
+          {
+            "id": "1e2c38d4-b94c-48e1-a7b2-cfc9cfadc53b",
+            "name": "换姿势开关",
+            "type": "BOOLEAN",
+            "linkIds": [
+              106
+            ],
+            "pos": [
+              -650,
+              244
+            ]
+          },
+          {
+            "id": "1db1170c-d09e-4736-a588-2b4d55ce3893",
+            "name": "换服饰开关",
+            "type": "BOOLEAN",
+            "linkIds": [
+              107
+            ],
+            "pos": [
+              -650,
+              278
+            ]
+          },
+          {
+            "id": "eac89217-dc51-4920-a1bc-d8bfcfb6385d",
+            "name": "自定义宽度",
+            "type": "INT",
+            "linkIds": [
+              108
+            ],
+            "pos": [
+              -650,
+              312
+            ]
+          },
+          {
+            "id": "319466f5-7047-49c7-aef2-0c937d9e3da9",
+            "name": "自定义高度",
+            "type": "INT",
+            "linkIds": [
+              109
+            ],
+            "pos": [
+              -650,
+              346
+            ]
+          },
+          {
+            "id": "0a069363-4d76-43e5-b18f-87946f8fdd25",
+            "name": "换服饰步数",
+            "type": "INT",
+            "linkIds": [
+              110
+            ],
+            "pos": [
+              -650,
+              380
+            ]
+          },
+          {
+            "id": "7d42132b-f23a-4292-826b-8bba7df7f589",
+            "name": "采样器",
+            "type": "COMBO",
+            "linkIds": [
+              111
+            ],
+            "pos": [
+              -650,
+              414
+            ]
+          },
+          {
+            "id": "7bfec9ee-bdf2-46ca-b474-9689a55b6855",
+            "name": "调度器",
+            "type": "COMBO",
+            "linkIds": [
+              112
+            ],
+            "pos": [
+              -650,
+              448
+            ]
+          },
+          {
+            "id": "7db98e08-d30b-4e3b-a682-06bd6e7a4d16",
+            "name": "随机种",
+            "type": "INT",
+            "linkIds": [
+              113
+            ],
+            "pos": [
+              -650,
+              482
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "id": "1ee33a8f-9170-427f-80e3-6d31fd7e1853",
+            "name": "换头像结果",
+            "type": "IMAGE",
+            "linkIds": [
+              132
+            ],
+            "pos": [
+              1440,
+              60
+            ]
+          },
+          {
+            "id": "e87df514-b819-46bd-b5ab-efd8a1ffb024",
+            "name": "换姿势结果",
+            "type": "IMAGE",
+            "linkIds": [
+              133
+            ],
+            "pos": [
+              1440,
+              140
+            ]
+          },
+          {
+            "id": "8e8d7162-33e6-4864-900d-a53c7db90371",
+            "name": "换服饰结果",
+            "type": "IMAGE",
+            "linkIds": [
+              134
+            ],
+            "pos": [
+              1440,
+              220
+            ]
+          }
+        ],
+        "widgets": [],
+        "nodes": [
+          {
+            "id": 1,
+            "type": "UNETLoader",
+            "pos": [
+              -650,
+              20
+            ],
+            "size": [
+              420,
+              90
+            ],
+            "flags": {},
+            "order": 0,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "unet_name",
+                "type": "COMBO",
+                "widget": {
+                  "name": "unet_name"
+                },
+                "link": null
+              },
+              {
+                "name": "weight_dtype",
+                "type": "COMBO",
+                "widget": {
+                  "name": "weight_dtype"
+                },
+                "link": null
+              }
+            ],
+            "outputs": [
+              {
+                "name": "MODEL",
+                "type": "MODEL",
+                "links": [
+                  120,
+                  121
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "UNETLoader"
+            },
+            "title": "Shared UNET",
+            "widgets_values": [
+              "qwen\\qwen_image_2.1_bf16.safetensors",
+              "default"
+            ]
+          },
+          {
+            "id": 2,
+            "type": "CLIPLoader",
+            "pos": [
+              -650,
+              150
+            ],
+            "size": [
+              420,
+              120
+            ],
+            "flags": {},
+            "order": 1,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "clip_name",
+                "type": "COMBO",
+                "widget": {
+                  "name": "clip_name"
+                },
+                "link": null
+              },
+              {
+                "name": "type",
+                "type": "COMBO",
+                "widget": {
+                  "name": "type"
+                },
+                "link": null
+              },
+              {
+                "name": "device",
+                "type": "COMBO",
+                "widget": {
+                  "name": "device"
+                },
+                "link": null,
+                "shape": 7
+              }
+            ],
+            "outputs": [
+              {
+                "name": "CLIP",
+                "type": "CLIP",
+                "links": [
+                  122,
+                  123
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "CLIPLoader"
+            },
+            "title": "Shared CLIP",
+            "widgets_values": [
+              "qwen3vl_8b_int8_convrot.safetensors",
+              "qwen_image",
+              "default"
+            ]
+          },
+          {
+            "id": 3,
+            "type": "VAELoader",
+            "pos": [
+              -650,
+              310
+            ],
+            "size": [
+              420,
+              70
+            ],
+            "flags": {},
+            "order": 2,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "vae_name",
+                "type": "COMBO",
+                "widget": {
+                  "name": "vae_name"
+                },
+                "link": null
+              }
+            ],
+            "outputs": [
+              {
+                "name": "VAE",
+                "type": "VAE",
+                "links": [
+                  124,
+                  125,
+                  126
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "VAELoader"
+            },
+            "title": "Shared VAE",
+            "widgets_values": [
+              "qwen_image_2.1_vae_bf16.safetensors"
+            ]
+          },
+          {
+            "id": 4,
+            "type": "LoraLoaderModelOnly",
+            "pos": [
+              -650,
+              420
+            ],
+            "size": [
+              420,
+              130
+            ],
+            "flags": {},
+            "order": 3,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "model",
+                "type": "MODEL",
+                "link": 120
+              },
+              {
+                "name": "lora_name",
+                "type": "COMBO",
+                "widget": {
+                  "name": "lora_name"
+                },
+                "link": null
+              },
+              {
+                "name": "strength_model",
+                "type": "FLOAT",
+                "widget": {
+                  "name": "strength_model"
+                },
+                "link": null
+              }
+            ],
+            "outputs": [
+              {
+                "name": "MODEL",
+                "type": "MODEL",
+                "links": [
+                  127
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "LoraLoaderModelOnly"
+            },
+            "title": "Pose LoRA",
+            "widgets_values": [
+              "qwen-image2.1\\VNCCS_QI2_PoseStudioV1.1.safetensors",
+              1
+            ]
+          },
+          {
+            "id": 5,
+            "type": "UNETLoader",
+            "pos": [
+              -650,
+              590
+            ],
+            "size": [
+              420,
+              90
+            ],
+            "flags": {},
+            "order": 4,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "unet_name",
+                "type": "COMBO",
+                "widget": {
+                  "name": "unet_name"
+                },
+                "link": null
+              },
+              {
+                "name": "weight_dtype",
+                "type": "COMBO",
+                "widget": {
+                  "name": "weight_dtype"
+                },
+                "link": null
+              }
+            ],
+            "outputs": [
+              {
+                "name": "MODEL",
+                "type": "MODEL",
+                "links": [
+                  128
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "UNETLoader"
+            },
+            "title": "Outfit UNET",
+            "widgets_values": [
+              "qwen\\qwen_image_2.1_int8_convrot.safetensors",
+              "default"
+            ]
+          },
+          {
+            "id": 6,
+            "type": "CLIPLoader",
+            "pos": [
+              -650,
+              720
+            ],
+            "size": [
+              420,
+              120
+            ],
+            "flags": {},
+            "order": 5,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "clip_name",
+                "type": "COMBO",
+                "widget": {
+                  "name": "clip_name"
+                },
+                "link": null
+              },
+              {
+                "name": "type",
+                "type": "COMBO",
+                "widget": {
+                  "name": "type"
+                },
+                "link": null
+              },
+              {
+                "name": "device",
+                "type": "COMBO",
+                "widget": {
+                  "name": "device"
+                },
+                "link": null,
+                "shape": 7
+              }
+            ],
+            "outputs": [
+              {
+                "name": "CLIP",
+                "type": "CLIP",
+                "links": [
+                  129
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "CLIPLoader"
+            },
+            "title": "Outfit CLIP",
+            "widgets_values": [
+              "qwen3vl_8b_int8_convrot.safetensors",
+              "qwen_image",
+              "default"
+            ]
+          },
+          {
+            "id": 7,
+            "type": "PoseQwen21FaceStage",
+            "pos": [
+              0,
+              20
+            ],
+            "size": [
+              390,
+              330
+            ],
+            "flags": {},
+            "order": 6,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "person_image",
+                "type": "IMAGE",
+                "link": 100
+              },
+              {
+                "name": "portrait_image",
+                "type": "IMAGE",
+                "link": 101
+              },
+              {
+                "name": "model",
+                "type": "MODEL",
+                "link": 121
+              },
+              {
+                "name": "clip",
+                "type": "CLIP",
+                "link": 122
+              },
+              {
+                "name": "vae",
+                "type": "VAE",
+                "link": 124
+              },
+              {
+                "name": "enable",
+                "type": "BOOLEAN",
+                "widget": {
+                  "name": "enable"
+                },
+                "link": 105
+              },
+              {
+                "name": "seed",
+                "type": "INT",
+                "widget": {
+                  "name": "seed"
+                },
+                "link": 113
+              }
+            ],
+            "outputs": [
+              {
+                "name": "IMAGE",
+                "type": "IMAGE",
+                "links": [
+                  130,
+                  132
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "PoseQwen21FaceStage"
+            },
+            "title": "换头像",
+            "widgets_values": [
+              true,
+              20261101
+            ]
+          },
+          {
+            "id": 8,
+            "type": "PoseQwen21PoseStage",
+            "pos": [
+              470,
+              20
+            ],
+            "size": [
+              390,
+              350
+            ],
+            "flags": {},
+            "order": 7,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "person_image",
+                "type": "IMAGE",
+                "link": 130
+              },
+              {
+                "name": "pose_image",
+                "type": "IMAGE",
+                "link": 102
+              },
+              {
+                "name": "model",
+                "type": "MODEL",
+                "link": 127
+              },
+              {
+                "name": "clip",
+                "type": "CLIP",
+                "link": 123
+              },
+              {
+                "name": "vae",
+                "type": "VAE",
+                "link": 125
+              },
+              {
+                "name": "enable",
+                "type": "BOOLEAN",
+                "widget": {
+                  "name": "enable"
+                },
+                "link": 106
+              },
+              {
+                "name": "seed",
+                "type": "INT",
+                "widget": {
+                  "name": "seed"
+                },
+                "link": 114
+              }
+            ],
+            "outputs": [
+              {
+                "name": "IMAGE",
+                "type": "IMAGE",
+                "links": [
+                  131,
+                  133
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "PoseQwen21PoseStage"
+            },
+            "title": "换姿势",
+            "widgets_values": [
+              true,
+              20261029
+            ]
+          },
+          {
+            "id": 9,
+            "type": "PoseQwen21OutfitStage",
+            "pos": [
+              940,
+              20
+            ],
+            "size": [
+              450,
+              480
+            ],
+            "flags": {},
+            "order": 8,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "person_image",
+                "type": "IMAGE",
+                "link": 131
+              },
+              {
+                "name": "garment_image",
+                "type": "IMAGE",
+                "link": 103
+              },
+              {
+                "name": "model",
+                "type": "MODEL",
+                "link": 128
+              },
+              {
+                "name": "clip",
+                "type": "CLIP",
+                "link": 129
+              },
+              {
+                "name": "vae",
+                "type": "VAE",
+                "link": 126
+              },
+              {
+                "name": "enable",
+                "type": "BOOLEAN",
+                "widget": {
+                  "name": "enable"
+                },
+                "link": 107
+              },
+              {
+                "name": "width",
+                "type": "INT",
+                "widget": {
+                  "name": "width"
+                },
+                "link": 108
+              },
+              {
+                "name": "height",
+                "type": "INT",
+                "widget": {
+                  "name": "height"
+                },
+                "link": 109
+              },
+              {
+                "name": "steps",
+                "type": "INT",
+                "widget": {
+                  "name": "steps"
+                },
+                "link": 110
+              },
+              {
+                "name": "sampler_name",
+                "type": "COMBO",
+                "widget": {
+                  "name": "sampler_name"
+                },
+                "link": 111
+              },
+              {
+                "name": "scheduler",
+                "type": "COMBO",
+                "widget": {
+                  "name": "scheduler"
+                },
+                "link": 112
+              },
+              {
+                "name": "seed",
+                "type": "INT",
+                "widget": {
+                  "name": "seed"
+                },
+                "link": 115
+              },
+              {
+                "name": "garment_description",
+                "type": "STRING",
+                "link": 104
+              }
+            ],
+            "outputs": [
+              {
+                "name": "IMAGE",
+                "type": "IMAGE",
+                "links": [
+                  134
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "PoseQwen21OutfitStage"
+            },
+            "title": "换服饰",
+            "widgets_values": [
+              true,
+              0,
+              0,
+              20,
+              "euler",
+              "simple",
+              20261101
+            ]
+          }
+        ],
+        "groups": [],
+        "links": [
+          {
+            "id": 100,
+            "origin_id": -10,
+            "origin_slot": 0,
+            "target_id": 7,
+            "target_slot": 0,
+            "type": "IMAGE"
+          },
+          {
+            "id": 101,
+            "origin_id": -10,
+            "origin_slot": 1,
+            "target_id": 7,
+            "target_slot": 1,
+            "type": "IMAGE"
+          },
+          {
+            "id": 102,
+            "origin_id": -10,
+            "origin_slot": 2,
+            "target_id": 8,
+            "target_slot": 1,
+            "type": "IMAGE"
+          },
+          {
+            "id": 103,
+            "origin_id": -10,
+            "origin_slot": 3,
+            "target_id": 9,
+            "target_slot": 1,
+            "type": "IMAGE"
+          },
+          {
+            "id": 104,
+            "origin_id": -10,
+            "origin_slot": 4,
+            "target_id": 9,
+            "target_slot": 12,
+            "type": "STRING"
+          },
+          {
+            "id": 105,
+            "origin_id": -10,
+            "origin_slot": 5,
+            "target_id": 7,
+            "target_slot": 5,
+            "type": "BOOLEAN"
+          },
+          {
+            "id": 106,
+            "origin_id": -10,
+            "origin_slot": 6,
+            "target_id": 8,
+            "target_slot": 5,
+            "type": "BOOLEAN"
+          },
+          {
+            "id": 107,
+            "origin_id": -10,
+            "origin_slot": 7,
+            "target_id": 9,
+            "target_slot": 5,
+            "type": "BOOLEAN"
+          },
+          {
+            "id": 108,
+            "origin_id": -10,
+            "origin_slot": 8,
+            "target_id": 9,
+            "target_slot": 6,
+            "type": "INT"
+          },
+          {
+            "id": 109,
+            "origin_id": -10,
+            "origin_slot": 9,
+            "target_id": 9,
+            "target_slot": 7,
+            "type": "INT"
+          },
+          {
+            "id": 110,
+            "origin_id": -10,
+            "origin_slot": 10,
+            "target_id": 9,
+            "target_slot": 8,
+            "type": "INT"
+          },
+          {
+            "id": 111,
+            "origin_id": -10,
+            "origin_slot": 11,
+            "target_id": 9,
+            "target_slot": 9,
+            "type": "COMBO"
+          },
+          {
+            "id": 112,
+            "origin_id": -10,
+            "origin_slot": 12,
+            "target_id": 9,
+            "target_slot": 10,
+            "type": "COMBO"
+          },
+          {
+            "id": 113,
+            "origin_id": -10,
+            "origin_slot": 13,
+            "target_id": 7,
+            "target_slot": 6,
+            "type": "INT"
+          },
+          {
+            "id": 114,
+            "origin_id": -10,
+            "origin_slot": 13,
+            "target_id": 8,
+            "target_slot": 6,
+            "type": "INT"
+          },
+          {
+            "id": 115,
+            "origin_id": -10,
+            "origin_slot": 13,
+            "target_id": 9,
+            "target_slot": 11,
+            "type": "INT"
+          },
+          {
+            "id": 120,
+            "origin_id": 1,
+            "origin_slot": 0,
+            "target_id": 4,
+            "target_slot": 0,
+            "type": "MODEL"
+          },
+          {
+            "id": 121,
+            "origin_id": 1,
+            "origin_slot": 0,
+            "target_id": 7,
+            "target_slot": 2,
+            "type": "MODEL"
+          },
+          {
+            "id": 122,
+            "origin_id": 2,
+            "origin_slot": 0,
+            "target_id": 7,
+            "target_slot": 3,
+            "type": "CLIP"
+          },
+          {
+            "id": 123,
+            "origin_id": 2,
+            "origin_slot": 0,
+            "target_id": 8,
+            "target_slot": 3,
+            "type": "CLIP"
+          },
+          {
+            "id": 124,
+            "origin_id": 3,
+            "origin_slot": 0,
+            "target_id": 7,
+            "target_slot": 4,
+            "type": "VAE"
+          },
+          {
+            "id": 125,
+            "origin_id": 3,
+            "origin_slot": 0,
+            "target_id": 8,
+            "target_slot": 4,
+            "type": "VAE"
+          },
+          {
+            "id": 126,
+            "origin_id": 3,
+            "origin_slot": 0,
+            "target_id": 9,
+            "target_slot": 4,
+            "type": "VAE"
+          },
+          {
+            "id": 127,
+            "origin_id": 4,
+            "origin_slot": 0,
+            "target_id": 8,
+            "target_slot": 2,
+            "type": "MODEL"
+          },
+          {
+            "id": 128,
+            "origin_id": 5,
+            "origin_slot": 0,
+            "target_id": 9,
+            "target_slot": 2,
+            "type": "MODEL"
+          },
+          {
+            "id": 129,
+            "origin_id": 6,
+            "origin_slot": 0,
+            "target_id": 9,
+            "target_slot": 3,
+            "type": "CLIP"
+          },
+          {
+            "id": 130,
+            "origin_id": 7,
+            "origin_slot": 0,
+            "target_id": 8,
+            "target_slot": 0,
+            "type": "IMAGE"
+          },
+          {
+            "id": 131,
+            "origin_id": 8,
+            "origin_slot": 0,
+            "target_id": 9,
+            "target_slot": 0,
+            "type": "IMAGE"
+          },
+          {
+            "id": 132,
+            "origin_id": 7,
+            "origin_slot": 0,
+            "target_id": -20,
+            "target_slot": 0,
+            "type": "IMAGE"
+          },
+          {
+            "id": 133,
+            "origin_id": 8,
+            "origin_slot": 0,
+            "target_id": -20,
+            "target_slot": 1,
+            "type": "IMAGE"
+          },
+          {
+            "id": 134,
+            "origin_id": 9,
+            "origin_slot": 0,
+            "target_id": -20,
+            "target_slot": 2,
+            "type": "IMAGE"
+          }
+        ],
+        "extra": {}
+      }
+    ]
+  },
+  "extra": {
+    "workflowName": "AICG3D · 输入四合一 + 单节点顺序替换",
+    "frontendVersion": "1.57.4",
+    "ds": {
+      "scale": 0.5,
+      "offset": [
+        120,
+        120
+      ]
+    }
+  },
+  "version": 0.4
+}

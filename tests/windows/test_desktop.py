@@ -95,3 +95,47 @@ def test_desktop_submit_cancel_preview(tmp_path, qt_app, monkeypatch):
             server.should_exit = True
             thread.join(10)
             assert not thread.is_alive()
+
+
+def test_desktop_reference_upload_and_lock(tmp_path, qt_app):
+    """回归：Client 漏 import 曾让"选择图片"永久卡在加载中。"""
+    from io import BytesIO
+
+    from PIL import Image
+    from localgen.desktop.reference import ReferencePicker
+
+    with bind_port(0) as sock:
+        settings = Settings(engine_mode="mock", api_port=sock.getsockname()[1], min_free_mib=0)
+        token = "desktop-upload-token"
+        server = uvicorn.Server(uvicorn.Config(
+            make_app(tmp_path, settings, token, engine=MockEngine(0.1)), log_config=None,
+            access_log=False, ws="none",
+        ))
+        thread = threading.Thread(target=serve, args=(server, sock), daemon=True)
+        thread.start()
+        window = Window(tmp_path, settings, token)
+        try:
+            buffer = BytesIO()
+            Image.new("RGB", (320, 200), (12, 34, 56)).save(buffer, "PNG")
+            answers = []
+            window.api.upload_image(buffer.getvalue(), "reference.png",
+                                    lambda value, error: answers.append((value, error)))
+            spin(lambda: answers)
+            value, error = answers[0]
+            assert error is None, error
+            assert value["name"].endswith(".png")
+
+            # 默认的演示工作流没有 image 输入 → 参考图控件必须锁定
+            spin(lambda: window.workflow.count() == 1)
+            assert window.reference.locked
+            assert not window.reference.choose_button.isEnabled()
+            # 换成支持参考图的模型（直接喂工作流能力，不依赖真实引擎）→ 解锁
+            picker = ReferencePicker(window.api.upload_image, window)
+            picker.set_locked(False)
+            assert picker.choose_button.isEnabled()
+            picker.deleteLater()
+        finally:
+            window.timer.stop()
+            window.close()
+            server.should_exit = True
+            thread.join(10)

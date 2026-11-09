@@ -1,0 +1,28 @@
+workflow_id = "pose-swap"
+revision = "1.0.0"
+title = "换姿势 / 换服装 · Qwen-Image-2.1"
+engine = "comfy"
+runner = "sdcpp"
+tier = "high"
+enabled = true
+template_sha256 = "55f45a8bdcb047b9a9f7b97ce6e9e37d1e9c0d2c36bfe5a2880b96b5e103f75c"
+default_size = [768, 768]
+verified_sizes = [[768, 768]]
+output_node = "2"
+models = [
+  ["1", "diffusion_model", "qwen_image_2.1-Q4_K.gguf"],
+  ["1", "text_encoder", "Qwen3VL-8B-Instruct-Q4_K_M.gguf"],
+  ["1", "vision_encoder", "mmproj-Qwen3VL-8B-Instruct-F16.gguf"],
+  ["1", "vae", "qwen_image_2.1_vae_bf16.safetensors"],
+]
+
+[inputs]
+prompt = ["1", "prompt"]
+negative_prompt = ["1", "negative_prompt"]
+image = ["1", "image"]
+pose_id = ["1", "pose_id"]
+garment_id = ["1", "garment_id"]
+width = ["1", "width"]
+height = ["1", "height"]
+seed = ["1", "seed"]
+output_prefix = ["2", "filename_prefix"]

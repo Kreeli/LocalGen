@@ -1,0 +1,27 @@
+workflow_id = "imported-kontext-basic"
+revision = "1.0.0"
+title = "FLUX.1 Kontext dev · GGUF · 导入（flux_kontext_dev_basic）"
+engine = "comfy"
+runner = "sdcpp"
+tier = "high"
+enabled = true
+template_sha256 = "d91aae3e44838b74e9f39777aef2e14dc066eae2570eedfa1fad660af601ea54"
+default_size = [1024, 1024]
+verified_sizes = [[1024, 1024]]
+output_node = "2"
+required_inputs = ["image"]
+models = [
+  ["1", "diffusion_model", "flux1-kontext-dev-Q4_K_M.gguf"],
+  ["1", "clip_l", "clip_l.safetensors"],
+  ["1", "t5xxl", "t5-v1_1-xxl-encoder-Q4_K_S.gguf"],
+  ["1", "vae", "ae.safetensors"],
+]
+
+[inputs]
+prompt = ["1", "prompt"]
+width = ["1", "width"]
+height = ["1", "height"]
+seed = ["1", "seed"]
+output_prefix = ["2", "filename_prefix"]
+negative_prompt = ["1", "negative_prompt"]
+image = ["1", "image"]

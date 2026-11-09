@@ -1,10 +1,10 @@
 """One MOSS-Image job using the pinned Windows stable-diffusion.cpp runtime."""
-import re
 from pathlib import Path
 from uuid import UUID
 
 from localgen.config import atomic_write, guarded
-from localgen.engine.sdcpp import BIN_FILES, missing_assets  # noqa: F401  (re-exported)
+from localgen.engine.sdcpp import (  # noqa: F401  (BIN_FILES 等是再导出)
+    BIN_FILES, missing_assets, stage_reference, track)
 from localgen.jobs.models import AppError
 
 MODEL_FILES = {
@@ -22,21 +22,21 @@ class MossJob:
         self.folder.mkdir(exist_ok=True)
         self.output = guarded(self.folder / "image.png")
         self.progress = None
+        self.stage = "loading"
+        self.note = None
         self.steps = parameters["steps"]
         self.gpu_oom = False
+        self.eta_marks = []
         prompt = self.folder / "prompt.txt"
         negative = self.folder / "negative.txt"
         atomic_write(prompt, parameters["prompt"].encode("utf-8"))
         atomic_write(negative, parameters.get("negative_prompt", "").encode("utf-8"))
         token = parameters.get("image") or ""
         if token:
-            if not re.match(r"^[0-9a-f]{32}\.(png|jpg|webp)$", token):
-                raise AppError(422, "INVALID_INPUT_IMAGE", "输入图引用无效")
-            source = guarded(Path(input_root) / token)
-            if not source.is_file():
-                raise AppError(422, "INPUT_IMAGE_MISSING", "输入图不存在或已过期，请重新上传")
-            init_image = guarded(self.folder / f"input{source.suffix}")
-            atomic_write(init_image, source.read_bytes())
+            # 与 Kontext 同一套规则：按输出比例裁切再缩放，交给 sd.cpp 的
+            # --init-img 使用（不让 sd.cpp 把自己的 init 图拉伸变形）。
+            init_image = stage_reference(token, Path(input_root), self.folder,
+                                         int(parameters["width"]), int(parameters["height"]))
         else:
             init_image = None
         self.cwd = guarded(runtime / "bin")
@@ -61,12 +61,7 @@ class MossJob:
 
     def on_line(self, line):
         # Keep prompts and subprocess details out of the application log.
-        progress = re.search(r"\|\s*(\d+)/(\d+)\b", line)
-        if progress and int(progress[2]) == self.steps:
-            self.progress = (int(progress[1]), self.steps)
-        lower = line.lower()
-        if "cuda" in lower and "out of memory" in lower:
-            self.gpu_oom = True
+        track(self, line)
 
     def read_result(self, returncode, limit):
         if returncode != 0 or not self.output.is_file():

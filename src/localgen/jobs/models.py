@@ -13,6 +13,10 @@ Size = Annotated[int, Field(strict=True, ge=1, le=8192)]
 Seed = Annotated[int, Field(strict=True, ge=0, le=4294967295)]
 Key = Annotated[str, StringConstraints(pattern=r"^[!-~]{1,128}$")]
 ImageToken = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}\.(png|jpg|webp)$")]
+# 图库条目 id：来源是第三方索引，含中文、点、横线、日文分类前缀，放宽到「不许有路径分隔符」。
+LibraryItemId = Annotated[str, StringConstraints(
+    strip_whitespace=True, min_length=1, max_length=80,
+    pattern=r"^[^/\\\x00]+$")]
 Strength = Annotated[float, Field(strict=True, gt=0, le=1)]
 
 
@@ -27,6 +31,9 @@ class Submission(BaseModel):
     negative_prompt: Negative | None = None
     image: ImageToken | None = None
     strength: Strength | None = None
+    # 换姿势 / 换服装：图库条目 id，引擎据此取素材当参考图。
+    pose_id: LibraryItemId | None = None
+    garment_id: LibraryItemId | None = None
 
     @model_validator(mode="after")
     def paired_dimensions(self):
@@ -53,6 +60,8 @@ class Progress(BaseModel):
     stage: str
     current: int | None = None
     total: int | None = None
+    # 引擎自报的速度/剩余时间（如 "22.4 s/it · ETA 09:08"），只用于展示。
+    detail: str | None = None
 
 
 class Artifact(BaseModel):

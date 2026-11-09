@@ -40,10 +40,21 @@ def test_kontext_job_resizes_reference_to_output_size(tmp_path):
         assert staged.size == (1024, 1024)
 
 
+def test_kontext_parameters_require_reference_image():
+    """manifest 的 required_inputs 必须在提交阶段就拦住，不能等引擎跑空一次。"""
+    workflow = _workflow()
+    with pytest.raises(AppError) as exc:
+        workflow.parameters(Submission(workflow_id="kontext-dev", prompt="x", seed=1))
+    assert exc.value.detail.code == "REQUIRED_INPUT_MISSING"
+
+
 def test_kontext_job_requires_reference_image(tmp_path):
     workflow = _workflow()
+    token = f"{uuid4().hex}.png"
     parameters = workflow.render(workflow.parameters(
-        Submission(workflow_id="kontext-dev", prompt="x", seed=1)), str(uuid4()))["1"]["inputs"]
+        Submission(workflow_id="kontext-dev", prompt="x", seed=1, image=token)),
+        str(uuid4()))["1"]["inputs"]
+    parameters["image"] = ""  # 引擎侧兜底：令牌被清空也不能静默退化成文生图
     with pytest.raises(AppError) as missing_token:
         KontextJob(str(uuid4()), tmp_path, tmp_path / "runtime", parameters, 0, tmp_path / "input")
     assert missing_token.value.detail.code == "INVALID_INPUT_IMAGE"

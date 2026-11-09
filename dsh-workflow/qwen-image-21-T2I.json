@@ -1,0 +1,36 @@
+{
+  "1": {
+    "class_type": "LocalGenQwenImage21",
+    "inputs": {
+      "diffusion_model": "qwen_image_2.1-Q4_K.gguf",
+      "text_encoder": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "vision_encoder": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+      "vae": "qwen_image_2.1_vae_bf16.safetensors",
+      "prompt": "{{prompt}}",
+      "negative_prompt": "",
+      "image": "",
+      "width": 1024,
+      "height": 1024,
+      "seed": "{{seed}}",
+      "steps": 30,
+      "cfg_scale": 6,
+      "sampling_method": "euler"
+    },
+    "_meta": {
+      "title": "dsh-image-gen:qwen-image-21:text2image"
+    }
+  },
+  "2": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "dsh-image-gen-qwen-image-21",
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "dsh-image-gen:qwen-image-21:text2image"
+    }
+  }
+}

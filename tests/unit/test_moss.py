@@ -1,11 +1,25 @@
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from PIL import Image, ImageDraw
 
 from localgen.engine.moss import MossJob
 from localgen.jobs.models import AppError, Submission
 from localgen.workflows import Registry
+
+
+def _stripes(size=(600, 300)):
+    """左红 / 中绿 / 右蓝的三段竖条：用来验证"裁切而非拉伸"。"""
+    image = Image.new("RGB", size, (200, 20, 20))
+    draw = ImageDraw.Draw(image)
+    third = size[0] // 3
+    draw.rectangle((third, 0, 2 * third - 1, size[1] - 1), fill=(20, 200, 20))
+    draw.rectangle((2 * third, 0, size[0] - 1, size[1] - 1), fill=(20, 20, 200))
+    buffer = BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
 
 
 def test_moss_job_uses_private_utf8_prompt_and_validates_output(tmp_path):
@@ -43,11 +57,15 @@ def test_moss_job_stages_private_init_image_for_img2img(tmp_path):
     assert parameters["image"] == token
     input_root = tmp_path / "input"
     input_root.mkdir()
-    (input_root / token).write_bytes(b"staged-png")
+    (input_root / token).write_bytes(_stripes())
     job = MossJob(job_id, tmp_path, tmp_path / "runtime", parameters, 0, input_root)
     assert job.command[job.command.index("--init-img") + 1] == str(job.folder / "input.png")
     assert job.command[job.command.index("--strength") + 1] == "0.5"
-    assert (job.folder / "input.png").read_bytes() == b"staged-png"
+    # 参考图按输出比例裁切（600×300 → 768²），不是拉伸
+    with Image.open(job.folder / "input.png") as staged:
+        assert staged.size == (768, 768)
+        assert staged.getpixel((20, 384))[0] > 120          # 左缘仍是红
+        assert staged.getpixel((200, 384))[1] > 120         # 原 x=200 处是绿（拉伸会变红）
     with pytest.raises(AppError) as exc:
         MossJob(str(uuid4()), tmp_path, tmp_path / "runtime", parameters, 0, tmp_path / "empty")
     assert exc.value.detail.code == "INPUT_IMAGE_MISSING"

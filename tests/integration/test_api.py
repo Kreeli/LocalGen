@@ -344,12 +344,30 @@ def test_comfyui_gateway(tmp_path):
                 break
             time.sleep(0.025)
         assert entry[moss_id]["status"]["status_str"] == "success"
-        # kontext（sdcpp runner）经网关文生图 + 图生图
+        # kontext（sdcpp runner）必须先有参考图：缺图由网关直接拒绝，不占用引擎
         kontext_graph = json.loads(json.dumps(
             api.get("/api/v1/workflows/kontext-dev/dsh-plugin").json()))
         kontext_graph["1"]["inputs"]["prompt"] = "网关 kontext"
         kontext_graph["1"]["inputs"]["seed"] = 21
-        kontext = api.post("/comfyui/prompt", json={"prompt": kontext_graph})
+        refused = api.post("/comfyui/prompt", json={"prompt": kontext_graph})
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["error"]["code"] == "REQUIRED_INPUT_MISSING"
+        # 图生图：上传源图 → moss image2image 图 → 提交（FakeSdcpp 收到 image 引用）
+        buffer = BytesIO()
+        Image.new("RGB", (64, 64), (10, 10, 10)).save(buffer, "PNG")
+        upload = api.post("/comfyui/upload/image",
+                          files={"image": ("src.png", buffer.getvalue(), "image/png")})
+        assert upload.status_code == 200, upload.text
+        token = upload.json()["name"]
+        assert upload.json()["subfolder"] == ""
+        # kontext 图生图：带参考图才放行，FakeSdcpp 收到 image 引用
+        kontext_edit = json.loads(json.dumps(
+            api.get("/api/v1/workflows/kontext-dev/dsh-plugin",
+                    params={"variant": "image2image"}).json()))
+        kontext_edit["1"]["inputs"]["prompt"] = "网关 kontext 图生图"
+        kontext_edit["1"]["inputs"]["seed"] = 22
+        kontext_edit["1"]["inputs"]["image"] = token
+        kontext = api.post("/comfyui/prompt", json={"prompt": kontext_edit})
         assert kontext.status_code == 200, kontext.text
         kontext_id = kontext.json()["prompt_id"]
         deadline = time.monotonic() + 8
@@ -360,15 +378,7 @@ def test_comfyui_gateway(tmp_path):
                 break
             time.sleep(0.025)
         assert entry[kontext_id]["status"]["status_str"] == "success"
-        assert engine.sdcpp_parameters[-1]["image"] == ""
-        # 图生图：上传源图 → moss image2image 图 → 提交（FakeSdcpp 收到 image 引用）
-        buffer = BytesIO()
-        Image.new("RGB", (64, 64), (10, 10, 10)).save(buffer, "PNG")
-        upload = api.post("/comfyui/upload/image",
-                          files={"image": ("src.png", buffer.getvalue(), "image/png")})
-        assert upload.status_code == 200, upload.text
-        token = upload.json()["name"]
-        assert upload.json()["subfolder"] == ""
+        assert engine.sdcpp_parameters[-1]["image"] == token
         edit_graph = json.loads(json.dumps(
             api.get("/api/v1/workflows/moss-image/dsh-plugin",
                     params={"variant": "image2image"}).json()))
@@ -445,6 +455,21 @@ def test_openai_compat_api(tmp_path):
         assert anon.json()["object"] == "list"
 
 
+def test_workflow_capability_surface(tmp_path):
+    """UI 依赖的能力声明：必填输入与重绘强度默认值。"""
+    with client(tmp_path, engine_mode="comfy") as api:
+        items = {item["workflow_id"]: item for item in api.get("/api/v1/workflows").json()["items"]}
+        assert items["kontext-dev"]["required_parameters"] == ["image"]
+        assert "image" in items["kontext-dev"]["supported_parameters"]
+        assert items["moss-image"]["default_strength"] == 0.5
+        assert items["moss-image"]["required_parameters"] == []
+        assert items["z-image-turbo"]["required_parameters"] == []
+        assert items["z-image-turbo"]["default_strength"] is None
+        missing = post(api, {"workflow_id": "kontext-dev", "prompt": "缺参考图"})
+        assert missing.status_code == 422
+        assert missing.json()["error"]["code"] == "REQUIRED_INPUT_MISSING"
+
+
 def test_image_parameter_requires_capability(tmp_path):
     with client(tmp_path, MockEngine(0.1)) as api:
         response = post(api, JOB | {"image": f"{uuid4().hex}.png"})
@@ -483,3 +508,50 @@ def test_progress_and_delete(tmp_path):
         assert not stored.exists()
         assert api.delete(active_path).status_code == 404
         assert api.get("/api/v1/progress").json() == {"job": None, "queued": 0}
+
+
+def test_qwen_image_21_workflow(tmp_path):
+    """qwen-image-21：一个工作流兼文生图与指令式编辑，不暴露 strength。"""
+    engine = FakeSdcpp()
+    with client(tmp_path, engine, engine_mode="comfy") as api:
+        items = {item["workflow_id"]: item for item in api.get("/api/v1/workflows").json()["items"]}
+        qwen = items["qwen-image-21"]
+        assert "image" in qwen["supported_parameters"]
+        assert "strength" not in qwen["supported_parameters"]
+        assert qwen["required_parameters"] == []
+        assert qwen["default_strength"] is None
+        assert [1024, 1024] in [list(size) for size in qwen["verified_sizes"]]
+
+        first = post(api, {"workflow_id": "qwen-image-21", "prompt": "深夜咖啡",
+                           "seed": 5, "width": 1024, "height": 1024})
+        assert first.status_code == 202, first.text
+        done = wait_for(api, first.headers["Location"], "succeeded")
+        artifact = done["artifacts"][0]
+        assert (artifact["width"], artifact["height"]) == (1024, 1024)
+        assert api.get(artifact["download_path"]).content.startswith(b"\x89PNG")
+        sent = engine.sdcpp_parameters[-1]
+        assert sent["diffusion_model"] == "qwen_image_2.1-Q4_K.gguf"
+        assert sent["text_encoder"] == "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+        assert sent["vision_encoder"] == "mmproj-Qwen3VL-8B-Instruct-F16.gguf"
+        assert sent["vae"] == "qwen_image_2.1_vae_bf16.safetensors"
+        assert sent["steps"] == 30 and sent["cfg_scale"] == 6
+        assert sent["image"] == ""
+
+        rejected = post(api, {"workflow_id": "qwen-image-21", "prompt": "x", "strength": 0.6})
+        assert rejected.status_code == 422
+        assert rejected.json()["error"]["code"] == "UNSUPPORTED_PARAMETER"
+        size = post(api, {"workflow_id": "qwen-image-21", "prompt": "x", "width": 768, "height": 768})
+        assert size.status_code == 422
+        assert size.json()["error"]["code"] == "UNSUPPORTED_SIZE"
+
+        buffer = BytesIO()
+        Image.new("RGB", (1200, 800), (20, 20, 20)).save(buffer, "PNG")
+        upload = api.post("/api/v1/images",
+                          files={"image": ("src.png", buffer.getvalue(), "image/png")})
+        assert upload.status_code == 200, upload.text
+        token = upload.json()["name"]
+        edit = post(api, {"workflow_id": "qwen-image-21", "prompt": "把背景换成海边日落",
+                          "seed": 6, "image": token})
+        assert edit.status_code == 202, edit.text
+        wait_for(api, edit.headers["Location"], "succeeded")
+        assert engine.sdcpp_parameters[-1]["image"] == token

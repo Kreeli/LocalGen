@@ -27,7 +27,22 @@ try {
     # ICU with version-suffixed exports from Git or another PATH entry.
     Get-ChildItem -LiteralPath $internal -File -Filter 'icu*.dll' |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName }
-    Get-Item -LiteralPath (Join-Path $bundle 'LocalGen.exe')
+    # 时间戳只能证明 exe 比源码新，不能证明代码真被装进去（stale build 目录 /
+    # .pyc 缓存 / --exclude 都能让时间戳对、内容错）。这里从 exe 里挖出 PYZ 的
+    # 字节码，跟当前 src/ 逐条指令比对；不一致就直接失败，别让"源码改了没重打"
+    # 这类事故流到验收阶段。
+    #
+    # 注意 $LASTEXITCODE 的坑：上面几行 `Get-ChildItem | ForEach-Object` 不会更新它，
+    # 但它可能还留着 PyInstaller 那次的值；而 `& $python` 之后要立刻取，中间不能插
+    # 别的原生命令。这里显式接住退出码，避免误判。
+    $exe = Join-Path $bundle 'LocalGen.exe'
+    $LASTEXITCODE = 0
+    & $python (Join-Path $root '.runtime\verify_packed.py') $exe
+    $verifyCode = $LASTEXITCODE
+    if ($verifyCode -ne 0) {
+        throw "Packed bytecode does not match src/ (verify_packed exit $verifyCode)."
+    }
+    Get-Item -LiteralPath $exe
 } finally {
     Pop-Location
 }

@@ -19,12 +19,22 @@ from localgen.config import atomic_write, guarded
 from localgen.engine import EngineStatus, Observation
 from localgen.engine.gguf import GGUF_FOLDER, verified_loader
 from localgen.engine.moss import MossJob, missing_assets
-from localgen.engine.sdcpp import KontextJob
+from localgen.engine.sdcpp import KontextJob, PoseSwapJob, QwenImageJob
 from localgen.engine.windows import WindowsProcess, listeners
 from localgen.jobs.models import AppError
 
 logger = logging.getLogger(__name__)
 COMFY_VERSION = "0.3.76"
+
+# sd-cli 任务类型：模板 node "1" 的 class_type → job 类。
+SDCPP_JOBS = {
+    "LocalGenMossImage": MossJob,
+    "LocalGenKontextImage": KontextJob,
+    "LocalGenQwenImage21": QwenImageJob,
+    "LocalGenPoseSwap": PoseSwapJob,
+}
+# 需要图库路径的 job（选中姿势/服装时把素材路径交给它自己 stage）。
+LIBRARY_JOBS = (PoseSwapJob,)
 
 
 async def previous_engine_exited(data: Path) -> bool:
@@ -319,9 +329,14 @@ class ComfyEngine:
         node_info = self.object_info
         if not await self.stop_process():
             raise AppError(503, "ENGINE_STOP_UNCONFIRMED", "无法释放 ComfyUI 显卡资源", True)
-        job_class = MossJob if graph["1"]["class_type"] == "LocalGenMossImage" else KontextJob
+        job_class = SDCPP_JOBS.get(graph["1"]["class_type"])
+        if job_class is None:
+            raise AppError(503, "WORKFLOW_REVISION_MISSING", "未知的 sd-cli 工作流类型", True)
+        extra = {}
+        if job_class in LIBRARY_JOBS:
+            extra["library_root"] = self.data / "libraries"
         job = job_class(job_id, self.folders["output"], self.moss_root, graph["1"]["inputs"],
-                        device, input_root=self.data / "gateway-input")
+                        device, input_root=self.data / "gateway-input", **extra)
         self.moss_job = job
         try:
             self.launch_owned(job.command, job.cwd, on_line=job.on_line,
@@ -340,13 +355,13 @@ class ComfyEngine:
         if job is None or job.job_id != prompt_id or self.process is None:
             raise AppError(503, "ENGINE_RESULT_LOST", "无法找到任务", True)
         if self.process.alive():
-            return Observation(progress=job.progress)
+            return Observation(progress=job.progress, stage=job.stage, detail=job.note)
         code = self.process.exit_code()
         if not await self.recycle():
             raise AppError(503, "ENGINE_STOP_UNCONFIRMED", "无法确认引擎已经退出", True)
         logger.info("SDCPP_EXIT job=%s code=%s", job.job_id, code)
         return Observation(image=job.read_result(code, self.settings.max_image_mib * 2**20),
-                           progress=job.progress)
+                           progress=job.progress, stage=job.stage, detail=job.note)
 
     async def queue(self):
         data = await self.get("/queue")

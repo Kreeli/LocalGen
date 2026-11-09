@@ -632,6 +632,7 @@ class Window(QMainWindow):
             self.refresh_selected()
 
     def update_engine(self, value, error):
+        previous = (self.engine or {}).get("state")
         self.engine = value or {}
         state = self.engine.get("state")
         name = {"ready": "引擎就绪", "starting": "引擎启动中", "stopping": "引擎停止中",
@@ -644,6 +645,11 @@ class Window(QMainWindow):
             self.footer.setText(f"{self.engine.get('device') or ''}  ·  本机服务 127.0.0.1:{self.settings.api_port}")
         elif code:
             self.footer.setText(DIAGNOSTICS.get(code, code) + f"  ·  引擎端口 {self.settings.engine_port}")
+        if state == "ready" and previous != "ready":
+            # 冷启动窗口里拉到的工作流列表 available=False 会一直缓存（列表只在
+            # 提交/删除/完成事件时重拉）——引擎就绪是唯一必须补拉的时机，否则
+            # "生成一张"永远灰着（用户反馈：引擎就绪但按钮点不动）。
+            self.refresh_workflows()
         self.controls()
 
     def update_workflows(self, value, error):

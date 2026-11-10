@@ -98,8 +98,8 @@ def test_translated_submission_is_accepted_by_workflow(registry):
     assert values["pose_id"] == "P001"
     assert values["garment_id"] == "SPR-0001"
     assert values["image"] == TOKEN
-    assert values["steps"] == 8
-    assert values["sigmas"] == "qwen-image-2.1-turbo"
+    assert values["steps"] == 15
+    assert "sigmas" not in values
 
 
 def test_extra_fields_forbidden():

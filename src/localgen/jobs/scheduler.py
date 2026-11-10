@@ -142,7 +142,11 @@ class Scheduler:
                     elif self.images.publish(self.db, job_id, artifact_id, staged, width, height):
                         # 发布成功、引擎目录即将被清理 —— 趁现在把参考图转存成任务附属物。
                         if parameters.get("image"):
-                            await asyncio.to_thread(self.images.keep_reference, job_id)
+                            await asyncio.to_thread(self.images.keep_reference, job_id, parameters)
+                        # 姿势/服装也一样：图库随时可能被重新导入或删掉，历史里要能
+                        # 一直看到"当时选的是哪一张"（用户反馈：历史记录看不到图）。
+                        if parameters.get("pose_id") or parameters.get("garment_id"):
+                            await asyncio.to_thread(self.images.keep_library, job_id, parameters)
                         self.engine.cleanup(job_id)
                     return
                 await self.pause()

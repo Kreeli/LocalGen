@@ -110,6 +110,39 @@ def reference_png(content: bytes, target: Size, box: FractionalBox | None = None
     return buffer.getvalue()
 
 
+def contain_reference(image: Image.Image, target: Size,
+                      fill: tuple[int, int, int] = (255, 255, 255)) -> Image.Image:
+    """Fit the whole image inside `target` without cropping, padding the rest.
+
+    Pose skeletons are 900x1200 portrait; centre-cropping them to a 768^2 square
+    cuts ~25% of the height away — the head and the feet — which destroys the
+    very pose information the reference is supposed to carry. Constraint images
+    (pose / garment) must be letterboxed instead of cropped.
+    """
+    target = (int(target[0]), int(target[1]))
+    image = ImageOps.exif_transpose(image)
+    if image.mode not in ("RGB", "L"):
+        image = image.convert("RGB")
+    width, height = image.size
+    if width <= 0 or height <= 0:
+        raise ValueError("图片尺寸无效")
+    scale = min(target[0] / width, target[1] / height)
+    fitted = (max(1, int(round(width * scale))), max(1, int(round(height * scale))))
+    resized = image.resize(fitted, Image.LANCZOS)
+    canvas = Image.new("RGB", target, fill)
+    offset = ((target[0] - fitted[0]) // 2, (target[1] - fitted[1]) // 2)
+    canvas.paste(resized.convert("RGB"), offset)
+    return canvas
+
+
+def contain_reference_png(content: bytes, target: Size,
+                          fill: tuple[int, int, int] = (255, 255, 255)) -> bytes:
+    """`contain_reference` for raw bytes; always a target-sized PNG."""
+    buffer = io.BytesIO()
+    contain_reference(open_rgb(content), target, fill).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
 def preview(image: Image.Image, limit: int = 1600) -> Image.Image:
     """裁切对话框显示用的缩略图（比例不变，只是省内存）。"""
     copy = image.copy()

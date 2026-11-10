@@ -78,21 +78,33 @@ def test_library_rejected_by_workflow_without_it(registry):
     assert caught.value.detail.code == "UNSUPPORTED_PARAMETER"
 
 
-def test_template_steps_stay_low(registry):
-    """用户明确要求步数不要改多：默认 8 步 + turbo 预设，且绝不超过 20。"""
+def test_template_steps_default(registry):
+    """默认 15 步（用户实测 8 步出图偏模糊）；turbo 预设已随默认移除
+    （turbo 是固定 8 档表，15 步会错拍，引擎侧 turbosecurity 同样会弃用）。"""
     graph = registry.current["pose-swap"].graph
-    assert graph["1"]["inputs"]["steps"] == 8
-    assert graph["1"]["inputs"]["steps"] <= 20
-    assert graph["1"]["inputs"]["sigmas"] == "qwen-image-2.1-turbo"
+    assert graph["1"]["inputs"]["steps"] == 15
+    assert graph["1"]["inputs"]["pose_steps"] == 15
+    assert graph["1"]["inputs"]["garment_steps"] == 15
+    assert "sigmas" not in graph["1"]["inputs"]
 
 
 def test_engine_fields_reach_the_node(registry):
-    """sigmas 不在 [inputs] 映射里，也必须通过 render() 落到节点上。"""
+    """分段步数走 [inputs] 映射落到节点；sigmas 已随默认 15 步移除。"""
     workflow = registry.current["pose-swap"]
     values = workflow.parameters(Submission(
         workflow_id="pose-swap", prompt="改姿势", pose_id="P001"))
-    assert values["sigmas"] == "qwen-image-2.1-turbo"
-    assert values["steps"] == 8
+    assert values["steps"] == 15
+    assert values["pose_steps"] == 15
+    assert values["garment_steps"] == 15
+    assert "sigmas" not in values
     graph = workflow.render(values, "11111111-1111-1111-1111-111111111111")
-    assert graph["1"]["inputs"]["sigmas"] == "qwen-image-2.1-turbo"
-    assert graph["1"]["inputs"]["steps"] == 8
+    assert graph["1"]["inputs"]["steps"] == 15
+    assert graph["1"]["inputs"]["pose_steps"] == 15
+    assert "sigmas" not in graph["1"]["inputs"]
+
+    values8 = workflow.parameters(Submission(
+        workflow_id="pose-swap", prompt="改姿势", pose_id="P001",
+        steps=8, pose_steps=8, garment_steps=8))
+    graph8 = workflow.render(values8, "11111111-1111-1111-1111-111111111111")
+    assert graph8["1"]["inputs"]["steps"] == 8
+    assert graph8["1"]["inputs"]["pose_steps"] == 8

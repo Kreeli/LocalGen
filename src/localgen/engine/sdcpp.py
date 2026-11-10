@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import UUID
 
 from localgen.config import atomic_write, guarded
-from localgen.imaging import reference_png
+from localgen.imaging import contain_reference_png, reference_png
 from localgen.jobs.models import AppError
 
 # Shared binary set of the pinned stable-diffusion.cpp runtime (localgen-moss/bin).
@@ -156,12 +156,25 @@ def stage_reference(token: str, input_root: Path, folder: Path, width: int, heig
 
 
 def stage_reference_file(source: Path, folder: Path, width: int, height: int,
-                         name: str) -> Path:
-    """Same staging rules, but the source is a local file (a picture pulled
-    straight from the pose/garment library instead of an uploaded token)."""
+                         name: str, fit: str = "cover") -> Path:
+    """Stage a library picture (pose skeleton / garment sheet) as a reference.
+
+    `fit` decides how a non-square source meets the output frame:
+
+    - "cover"   crop to the output aspect ratio (person photos: filling the frame
+                avoids letterbox bars the model would otherwise imitate);
+    - "contain" letterbox the whole picture (pose skeletons and garment sheets:
+                cropping a 3:4 portrait to 1:1 removes ~25% of the height, i.e.
+                the head and the feet, which is exactly the pose information the
+                reference exists to carry).
+    """
     ref = guarded(Path(folder) / name)
     try:
-        content = reference_png(guarded(source).read_bytes(), (int(width), int(height)))
+        content = guarded(source).read_bytes()
+        if fit == "contain":
+            content = contain_reference_png(content, (int(width), int(height)))
+        else:
+            content = reference_png(content, (int(width), int(height)))
     except AppError:
         raise
     except Exception:
@@ -169,6 +182,18 @@ def stage_reference_file(source: Path, folder: Path, width: int, height: int,
                        "图库素材不是可解码的图片") from None
     atomic_write(ref, content)
     return ref
+
+
+# Kontext 是"指令编辑"模型：它认的是 "change X to Y, keep everything else"
+# 这种句式。中文短句进 prompt 时，模型经常当文生图处理——输出的构图、主体、
+# 光线全换掉，用户看到的就是"提示词完全没生效"。补一段英文角色说明即可，
+# 采样参数（guidance / cfg / steps）保持不变，那是验证过的组合。
+KONTEXT_ROLE = (
+    "The attached image is the source photo to edit, not inspiration.\n"
+    "Edit THAT image: keep its composition, framing, subject, pose, background "
+    "layout and art style unchanged, and apply only the change described below. "
+    "Do not draw a new picture and do not ignore the instruction.\n\n"
+)
 
 
 class KontextJob:
@@ -194,7 +219,12 @@ class KontextJob:
         self.eta_marks = []
         prompt = self.folder / "prompt.txt"
         negative = self.folder / "negative.txt"
-        atomic_write(prompt, parameters["prompt"].encode("utf-8"))
+        # 角色说明：sd-cli 只把 --ref-image 当成一张"图"喂给编码器，从不说它是
+        # 原图还是素材。只给一句"改成黄昏色调"时，实测模型会把它当文生图的
+        # 额外条件、直接重新画一张构图全新的大图——提示词里的改动全被忽略。
+        # 补一句英文角色说明（Kontext 的训练语料就是这种写法），明确"照这张
+        # 原图改、保留构图"。只动提示词，采样参数一律不碰。
+        atomic_write(prompt, (KONTEXT_ROLE + parameters["prompt"]).encode("utf-8"))
         atomic_write(negative, parameters.get("negative_prompt", "").encode("utf-8"))
         token = parameters.get("image") or ""
         ref_image = stage_reference(token, Path(input_root), self.folder,
@@ -331,17 +361,28 @@ def turbo_safe_sigmas(parameters) -> str | None:
 
 
 class PoseSwapJob(QwenImageJob):
-    """Qwen-Image-2.1 with TWO references: one locks identity, one locks pose.
+    """Qwen-Image-2.1 换姿势 / 换装：单段或两段链式 sd-cli。
 
-    Measured on this machine (RTX 4050 6 GB, Q4_K, 768², 20 steps):
+    单段（只选姿势或只选服装）：人物图 + 一张约束参考图，一次出图。
 
-    - both orders work: the model matches content, not position — the skeleton
-      figure is read as the pose and the photo as the person either way;
-    - pose-first is FASTER (415 s vs 571 s), so that is the default here.
+    两段（姿势 + 服装同时选中）：姿势与服装是两种强度的编辑——换装是局部编辑
+    （模型低风险就能满足），换姿势是全局重排（要重画整个人体骨架）；同一次生成里
+    两个指令竞争时，模型永远走低风险的那条路，实测表现就是"衣服换了、姿势没换"
+    （同种子对照：job cb689751 纯姿势成功 vs cdfd8157 加服装后姿势失效）。
+    插件原版（comfyui-aicg3d-PoseSwap）正是两段流水线：先姿势段、再服装段。
+    这里把同样的架构做进引擎：第一段（姿势段）人物图 + 骨骼图 → 中间产物
+    stage-pose.png；第二段（换装段）拿中间产物当人物图 + 服装参考 → 最终 image.png。
+    两段共用同一份 sd-cli 运行时与模型权重，段间由 ComfyEngine.observe_sdcpp
+    无缝接续，调度器和 REST/MCP 契约完全无感。
 
-    Steps stay at the caller's value (20 by default): going higher only costs
-    time, the pose is already following at 20.
+    分段步数：pose_steps / garment_steps（manifest 1.1.0 起声明），默认跟随模板
+    steps（8 步配 turbo sigma 预设；步数被改走时引擎自动弃用预设，见
+    turbo_safe_sigmas）。两段同用提交种子，保证可复现。姿势 LoRA 只挂姿势段——
+    换装段挂它反而会把服装往训练集的样子上拽。
     """
+
+    STAGE_OUTPUT = "stage-pose.png"   # 姿势段产物（两段式才有）
+    S2_PREFIX = "s2-"                 # 第二段参考图文件名前缀，避免与第一段互相覆盖
 
     def __init__(self, job_id, output_root, runtime, parameters, device, input_root,
                  library_root: Path | None = None):
@@ -352,72 +393,228 @@ class PoseSwapJob(QwenImageJob):
         self.progress = None
         self.stage = "loading"
         self.note = None
-        self.steps = parameters["steps"]
         self.gpu_oom = False
         self.eta_marks = []
-        prompt = self.folder / "prompt.txt"
-        negative = self.folder / "negative.txt"
-        atomic_write(prompt, parameters["prompt"].encode("utf-8"))
-        atomic_write(negative, parameters.get("negative_prompt", "").encode("utf-8"))
-
-        width, height = int(parameters["width"]), int(parameters["height"])
-        self.sources: list[Path] = []
-        # 顺序有意义：第一条 --ref-image 建立 prefix cache，姿势图 token 少、建得更省。
-        if parameters.get("pose_id"):
-            self.sources.append(self.library_picture(library_root, "poses", parameters["pose_id"]))
-        if parameters.get("garment_id"):
-            self.sources.append(self.library_picture(library_root, "garments", parameters["garment_id"]))
-        token = parameters.get("image") or ""
-        if token:
-            self.sources.append(("token", token))
-        if not self.sources:
-            raise AppError(422, "INVALID_INPUT_IMAGE", "换姿势/换装至少需要一张参考图")
-
-        references = []
-        for index, source in enumerate(self.sources):
-            if isinstance(source, tuple):
-                references.append(stage_reference(source[1], Path(input_root), self.folder,
-                                                  width, height, f"ref{index}-person.png"))
-            else:
-                references.append(stage_reference_file(source, self.folder, width, height,
-                                                       f"ref{index}-library.png"))
-
+        self.steps = 8
+        self.parameters = parameters
+        self.device = device
+        self.input_root = input_root
+        self.width, self.height = int(parameters["width"]), int(parameters["height"])
         self.cwd = guarded(runtime / "bin")
+        self.models_root = guarded(runtime / "models")
+        self.stage_index = 0
+        self.stages: list[dict] = []
+        self.command: list[str] = []
+
         model_names = [parameters[key] for key in
                        ("diffusion_model", "text_encoder", "vision_encoder", "vae")]
         if tuple(model_names) != tuple(self.MODEL_FILES):
             raise AppError(503, "WORKFLOW_DEPENDENCIES_MISSING", "Qwen-Image-2.1 模板需要经验证的模型文件")
-        diffusion, encoder, vision, vae = (str(guarded(runtime / "models" / name)) for name in model_names)
-        self.command = [
+        self.diffusion, self.encoder, self.vision, self.vae = (
+            str(guarded(self.models_root / name)) for name in model_names)
+        self.lora_dir = parameters.get("lora_model_dir")
+        self.lora_mode = parameters.get("lora_apply_mode")
+
+        # 来源解析在提交期一次做完：坏图库 id 不许拖到引擎中途才炸。
+        sources: dict[str, dict] = {}
+        token = parameters.get("image") or ""
+        if token:
+            sources["person"] = {"kind": "person", "value": ("token", token)}
+        if parameters.get("pose_id"):
+            sources["pose"] = {"kind": "pose",
+                               "value": self.library_picture(library_root, "poses", parameters["pose_id"]),
+                               "entry": self.library_entry(library_root, "poses", parameters["pose_id"])}
+        if parameters.get("garment_id"):
+            sources["garment"] = {"kind": "garment",
+                                  "value": self.library_picture(library_root, "garments", parameters["garment_id"]),
+                                  "entry": self.library_entry(library_root, "garments", parameters["garment_id"])}
+        if not sources:
+            raise AppError(422, "INVALID_INPUT_IMAGE", "换姿势/换装至少需要一张参考图")
+
+        pose_steps = self._stage_steps(parameters, "pose")
+        garment_steps = self._stage_steps(parameters, "garment")
+        two_stage = "pose" in sources and "garment" in sources
+
+        if not two_stage:
+            picked = [sources[kind] for kind in ("person", "pose", "garment") if kind in sources]
+            label = ("姿势段" if "pose" in sources
+                     else "换装段" if "garment" in sources else "")
+            self.stages = [{
+                "label": label, "steps": pose_steps if "pose" in sources else garment_steps,
+                "sources": picked, "output": self.output,
+                "prompt_file": self.folder / "prompt.txt",
+                "negative_file": self.folder / "negative.txt",
+                "log_name": f"sdcpp-{self.job_id}.log",
+                "lora": bool(self.lora_dir), "ref_prefix": "",
+            }]
+        else:
+            self.stages = [
+                {"label": "姿势段", "steps": pose_steps,
+                 "sources": [sources["person"], sources["pose"]],
+                 "output": guarded(self.folder / self.STAGE_OUTPUT),
+                 "prompt_file": self.folder / "prompt.txt",
+                 "negative_file": self.folder / "negative.txt",
+                 "log_name": f"sdcpp-{self.job_id}-s1.log",
+                 "lora": bool(self.lora_dir), "ref_prefix": ""},
+                {"label": "换装段", "steps": garment_steps,
+                 "sources": [sources["garment"]],
+                 "output": self.output,
+                 "prompt_file": self.folder / "prompt-s2.txt",
+                 "negative_file": self.folder / "negative-s2.txt",
+                 "log_name": f"sdcpp-{self.job_id}.log",
+                 "lora": False, "ref_prefix": self.S2_PREFIX,
+                 "person_from_previous": True},
+            ]
+        self._materialize_stage()
+
+    @staticmethod
+    def _stage_steps(parameters, prefix: str) -> int:
+        """分段步数：分段值 > 全局 steps > 模板默认（15）。范围在 Submission 已限 1–25。
+
+        用户实测 8 步出图偏模糊，默认提到 15（turbo 预设是固定 8 档表，15 步
+        自动回落 euler 常规 schedule）。
+        """
+        value = parameters.get(f"{prefix}_steps") or parameters.get("steps") or 15
+        return max(1, min(25, int(value)))
+
+    def _legend(self, sources: list[dict], person_note: str = "") -> str:
+        """参考图角色说明 + 图库语义注入。
+
+        sd-cli 只按顺序编号图片，不告诉模型"第几张管什么"；缺这段说明时模型会把
+        骨骼图当原图主体直接复刻（实测）。图库条目的文字语义也在这里注入：
+        姿势图是线条人偶，靠姿势名补语义；服装描述是英文服装清单，鞋袜包这类
+        小件不点名就不会被替换（实测 SWM-0002 的 mesh bag）。插件原版就是把
+        garment_description 接进编辑节点的，这里补上等价通道。
+        """
+        roles = []
+        for index, source in enumerate(sources, start=1):
+            if source["kind"] == "person":
+                roles.append(f"image {index}: the person to keep "
+                             f"(identity, face, hair, art style){person_note}")
+            elif source["kind"] == "pose":
+                roles.append(f"image {index}: a pose reference ONLY — copy its body pose, "
+                             f"limb positions and camera angle; never copy its look, "
+                             f"clothing or background")
+            elif source["kind"] == "garment":
+                roles.append(f"image {index}: a garment reference ONLY — copy what the "
+                             f"person wears; never copy its background or its person")
+        legend = ("Reference images, in order:\n" + "\n".join(roles)
+                  + "\nDo NOT output any reference image itself. Draw a new picture where the "
+                    "person from image 1 keeps their identity and adopts the pose / clothing "
+                    "shown by the other references.\n\n")
+        for source in sources:
+            entry = source.get("entry") or {}
+            description = str(entry.get("description") or "").strip()
+            title = str(entry.get("title") or "").strip()
+            if source["kind"] == "pose" and title:
+                legend += f"Pose to reproduce: {title}\n"
+            if source["kind"] == "garment" and description:
+                legend += (f"Outfit to dress the person in (replace ALL of these items): "
+                           f"{description}\n")
+        return legend
+
+    def _materialize_stage(self):
+        """把当前段落成命令：staging 参考图、写分段提示词、拼 sd-cli 命令行。
+
+        两段式的第二段"人物图"是第一段产物（stage-pose.png），只有第一段跑完才
+        存在，所以第二段在 advance() 里才 materialize。
+        """
+        stage = self.stages[self.stage_index]
+        sources = list(stage["sources"])
+        if stage.get("person_from_previous"):
+            sources.insert(0, {"kind": "person",
+                               "value": ("file", str(self.stages[self.stage_index - 1]["output"]))})
+        person_note = ("; their pose is already final — do not change it"
+                       if stage.get("person_from_previous") else "")
+        prefix = stage.get("ref_prefix", "")
+
+        references = []
+        for index, source in enumerate(sources):
+            # 约束图（姿势骨骼 / 服装平铺）加信箱边距（contain），身体任何部分
+            # 都不许被裁掉；人物照片照旧填满画框（cover）。
+            fit = "cover" if source["kind"] == "person" else "contain"
+            name = f"{prefix}ref{index}-{source['kind']}.png"
+            if isinstance(source["value"], tuple):
+                kind, value = source["value"]
+                if kind == "token":
+                    references.append(stage_reference(value, Path(self.input_root), self.folder,
+                                                      self.width, self.height, name))
+                else:
+                    references.append(stage_reference_file(Path(value), self.folder,
+                                                           self.width, self.height, name, fit))
+            else:
+                references.append(stage_reference_file(source["value"], self.folder,
+                                                       self.width, self.height, name, fit))
+
+        atomic_write(stage["prompt_file"],
+                     (self._legend(sources, person_note) + self.parameters["prompt"]).encode("utf-8"))
+        atomic_write(stage["negative_file"],
+                     self.parameters.get("negative_prompt", "").encode("utf-8"))
+
+        stage_params = {**self.parameters, "steps": stage["steps"]}
+        command = [
             str(guarded(self.cwd / "sd-cli.exe")),
-            "--diffusion-model", diffusion, "--llm", encoder, "--vae", vae,
-            "--prompt-file", str(prompt), "--negative-prompt-file", str(negative),
-            "--output", str(self.output),
-            "--width", str(width), "--height", str(height),
-            "--seed", str(parameters["seed"]),
-            "--steps", str(self.steps), "--cfg-scale", str(parameters["cfg_scale"]),
-            "--sampling-method", parameters["sampling_method"],
+            "--diffusion-model", self.diffusion, "--llm", self.encoder, "--vae", self.vae,
+            "--prompt-file", str(stage["prompt_file"]),
+            "--negative-prompt-file", str(stage["negative_file"]),
+            "--output", str(stage["output"]),
+            "--width", str(self.width), "--height", str(self.height),
+            "--seed", str(self.parameters["seed"]),
+            "--steps", str(stage["steps"]), "--cfg-scale", str(self.parameters["cfg_scale"]),
+            "--sampling-method", self.parameters["sampling_method"],
             "--mmap", "--disable-image-metadata",
-            "--backend", f"diffusion=cuda{device},te=cpu,vae=cuda{device}", "--max-vram", "-1",
-            "--flash-attn", "auto", "--threads", "6",
+            "--backend", f"diffusion=cuda{self.device},te=cpu,vae=cuda{self.device}",
+            "--max-vram", "-1", "--flash-attn", "auto", "--threads", "6",
         ]
-        sigmas = turbo_safe_sigmas(parameters)
+        sigmas = turbo_safe_sigmas(stage_params)
         if sigmas:
-            self.command.extend(["--sigmas", sigmas])
-        # 姿势 LoRA：sd-cli 扫目录自动加载，不需要点名文件。
-        # 实测 V1.1（rank 32，base=qwen_image_2）在 8 步 turbo 下能跟随骨骼姿势，
-        # 代价约 +59 s（253 → 312 s），换取更稳的服装/背景保持。
-        if parameters.get("lora_model_dir"):
-            self.command.extend(["--lora-model-dir",
-                                 str(guarded(runtime / "models" / parameters["lora_model_dir"]))])
-            if parameters.get("lora_apply_mode"):
-                self.command.extend(["--lora-apply-mode", str(parameters["lora_apply_mode"])])
+            command.extend(["--sigmas", sigmas])
+        # 姿势 LoRA 只挂姿势段：实测 V1.1（rank 32，base=qwen_image_2）在 8 步 turbo
+        # 下能跟随骨骼姿势，代价约 +59 s（253 → 312 s）。换装段不挂——它会把服装
+        # 往训练集的样子上拽。
+        if stage["lora"] and self.lora_dir:
+            command.extend(["--lora-model-dir", str(guarded(self.models_root / self.lora_dir))])
+            if self.lora_mode:
+                command.extend(["--lora-apply-mode", self.lora_mode])
         for reference in references:
-            self.command.extend(["--ref-image", str(reference)])
+            command.extend(["--ref-image", str(reference)])
         # 多张参考图时给它们编号，避免模型把两张图混成一张的语义。
         if len(references) > 1:
-            self.command.append("--increase-ref-index")
-        self.command.extend(["--llm_vision", vision])
+            command.append("--increase-ref-index")
+        command.extend(["--llm_vision", self.vision])
+
+        self.command = command
+        self.output = stage["output"]
+        self.steps = stage["steps"]
+        self.log_name = stage["log_name"]
+
+    def advance_ready(self, returncode: int) -> bool:
+        """当前段成功且还有下一段 → 引擎应立即接续下一段。段失败时走正常失败路径。"""
+        return returncode == 0 and self.stage_index + 1 < len(self.stages)
+
+    def advance(self):
+        """姿势段 → 换装段：staging 第二段参考图并拼好新命令，供引擎重新拉起。
+
+        ETA 窗口与进度一并清零——两段的每步耗时不可比，混算会把 ETA 推歪。
+        """
+        self.stage_index += 1
+        self.eta_marks = []
+        self.progress = None
+        if not self.stages[self.stage_index - 1]["output"].is_file():
+            # sd-cli 退出码 0 但没写中间图：比 FileNotFoundError 更能说明问题。
+            raise AppError(503, "ENGINE_EXECUTION_FAILED", "姿势段没有产出中间图", True)
+        self._materialize_stage()
+
+    def on_line(self, line):
+        # track() 只在行匹配进度模式时才更新 note；sd-cli 的其余输出行不动它。
+        # 只在 note 真的被刷新时加段落前缀，否则同一句 note 会被重复包上
+        # "姿势段 · 姿势段 · …"（真机第一次两段跑实测踩到）。
+        previous = self.note
+        track(self, line)
+        label = self.stages[self.stage_index]["label"]
+        if (label and len(self.stages) > 1 and self.note
+                and self.note is not previous and not self.note.startswith(f"{label} ·")):
+            self.note = f"{label} · {self.note}"
 
     @staticmethod
     def library_picture(library_root: Path | None, kind: str, item_id: str) -> Path:
@@ -428,6 +625,23 @@ class PoseSwapJob(QwenImageJob):
 
         try:
             return LibraryStore(Path(library_root), Path(library_root)).source_path(kind, item_id)
+        except AppError:
+            raise
+        except (OSError, ValueError) as exc:
+            raise AppError(503, "LIBRARY_NOT_INSTALLED", "本机图库不可用", True) from exc
+
+    @staticmethod
+    def library_entry(library_root: Path | None, kind: str, item_id: str) -> dict:
+        """图库条目的元数据（title / description），给提示词注入用。
+
+        与 library_picture 同源（同一个 LibraryStore 缓存），查不到同一套错误码。
+        """
+        if library_root is None:
+            raise AppError(503, "LIBRARY_NOT_INSTALLED", "本机图库不可用", True)
+        from localgen.storage.libraries import LibraryStore
+
+        try:
+            return LibraryStore(Path(library_root), Path(library_root)).entry(kind, item_id)
         except AppError:
             raise
         except (OSError, ValueError) as exc:

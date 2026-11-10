@@ -42,6 +42,10 @@ class Submission(BaseModel):
     # 扩散步数 / CFG 覆盖：None = 用工作流模板默认值（推荐）。上限见类型注释。
     steps: Steps | None = None
     cfg_scale: CfgScale | None = None
+    # 两段式（姿势+服装同时选中）的分段步数覆盖：姿势段 / 换装段各一档。
+    # 只在声明了这些输入的工作流（pose-swap 1.1.0+）可用，其他工作流 422。
+    pose_steps: Steps | None = None
+    garment_steps: Steps | None = None
 
     @model_validator(mode="after")
     def paired_dimensions(self):

@@ -121,7 +121,7 @@ def registry():
 def test_steps_default_is_template_value(registry):
     workflow = registry.current["pose-swap"]
     values = workflow.parameters(_submit(pose_id="P001"))
-    assert values["steps"] == 8            # 模板默认（turbo 档）
+    assert values["steps"] == 15           # 模板默认（用户实测 8 步偏模糊）
     assert values["cfg_scale"] == 4
 
 

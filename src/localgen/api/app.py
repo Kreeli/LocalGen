@@ -205,6 +205,27 @@ def make_app(data, settings, token, *, engine=None, workflow_root=None):
         response.status_code = 202 if job.status == "cancelling" else 200
         return job
 
+    @router.get("/jobs/{job_id}/attachments/{name}")
+    async def job_attachment(job_id: UUID, name: str):
+        """任务附属物：reference / pose / garment。
+
+        这三张图在发布成功那一刻从引擎目录转存进 `results/<job_id>/`，永久有效；
+        与 `gateway-input/<token>` 的区别是后者会被 TTL 清掉。历史里"复用参数"
+        必须能拿回当初那张参考图，所以必须走这条路由，不能再去赌 token 还活着。
+        """
+        if name not in {"reference", "pose", "garment"}:
+            raise AppError(404, "ATTACHMENT_NOT_FOUND", "没有这个附属图")
+        try:
+            job = str(UUID(str(job_id)))
+        except (ValueError, TypeError):
+            raise AppError(404, "JOB_NOT_FOUND", "找不到此任务") from None
+        path = app.state.data / "results" / job / f"{name}.png"
+        if not path.is_file():
+            raise AppError(404, "ATTACHMENT_NOT_FOUND", "此任务没有保存这张附属图")
+        return FileResponse(path, media_type="image/png",
+                            headers={"Cache-Control": "private, max-age=86400",
+                                     "X-Content-Type-Options": "nosniff"})
+
     @router.get("/jobs/{job_id}/artifacts/{artifact_id}")
     async def image(job_id: UUID, artifact_id: UUID):
         file = service().artifact(job_id, artifact_id)

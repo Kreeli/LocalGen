@@ -340,7 +340,8 @@ class ComfyEngine:
         self.moss_job = job
         try:
             self.launch_owned(job.command, job.cwd, on_line=job.on_line,
-                              log_file=guarded(self.data / "logs" / f"sdcpp-{job_id}.log"))
+                              log_file=guarded(self.data / "logs" /
+                                               getattr(job, "log_name", f"sdcpp-{job_id}.log")))
         except OSError as exc:
             await self.recycle()
             raise AppError(503, "ENGINE_LAUNCH_FAILED", "引擎启动失败", True) from exc
@@ -357,6 +358,23 @@ class ComfyEngine:
         if self.process.alive():
             return Observation(progress=job.progress, stage=job.stage, detail=job.note)
         code = self.process.exit_code()
+        if job.advance_ready(code):
+            # 两段式（姿势段 → 换装段）：上一段成功，立即 materialize 下一段并拉起。
+            # 不走 recycle——引擎状态保持 SDCPP_ACTIVE，调度器/REST 契约完全无感。
+            try:
+                job.advance()
+            except AppError:
+                await self.recycle()
+                raise
+            try:
+                self.launch_owned(job.command, job.cwd, on_line=job.on_line,
+                                  log_file=guarded(self.data / "logs" / job.log_name))
+            except OSError as exc:
+                await self.recycle()
+                raise AppError(503, "ENGINE_LAUNCH_FAILED", "下一段引擎启动失败", True) from exc
+            logger.info("SDCPP_STAGE job=%s stage=%s pid=%s", job.job_id,
+                        job.stages[job.stage_index]["label"], self.process.pid)
+            return Observation(progress=job.progress, stage=job.stage, detail=job.note)
         if not await self.recycle():
             raise AppError(503, "ENGINE_STOP_UNCONFIRMED", "无法确认引擎已经退出", True)
         logger.info("SDCPP_EXIT job=%s code=%s", job.job_id, code)

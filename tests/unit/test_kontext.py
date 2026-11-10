@@ -40,6 +40,27 @@ def test_kontext_job_resizes_reference_to_output_size(tmp_path):
         assert staged.size == (1024, 1024)
 
 
+def test_kontext_prompt_tells_the_model_the_image_is_the_source(tmp_path):
+    """只给一句中文指令时模型会当文生图重画——prompt.txt 必须带角色说明。"""
+    workflow = _workflow()
+    token = f"{uuid4().hex}.png"
+    parameters = workflow.render(workflow.parameters(
+        Submission(workflow_id="kontext-dev", prompt="改成黄昏色调", seed=11, image=token)),
+        str(uuid4()))["1"]["inputs"]
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / token).write_bytes(_png_bytes(size=(640, 640)))
+    job = KontextJob(str(uuid4()), tmp_path, tmp_path / "runtime", parameters, 0, input_root)
+    text = (job.folder / "prompt.txt").read_text("utf-8")
+    assert text.endswith("改成黄昏色调")                  # 用户原话一字不改、留在末尾
+    head = text[: -len("改成黄昏色调")]
+    assert "source photo to edit" in head
+    assert "keep its composition" in head
+    # 只动提示词：采样参数保持验证过的那一组。
+    assert job.command[job.command.index("--guidance") + 1] == "2.5"
+    assert job.command[job.command.index("--cfg-scale") + 1] == "1"
+
+
 def test_kontext_parameters_require_reference_image():
     """manifest 的 required_inputs 必须在提交阶段就拦住，不能等引擎跑空一次。"""
     workflow = _workflow()

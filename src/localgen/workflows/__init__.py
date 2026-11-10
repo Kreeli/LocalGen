@@ -51,7 +51,7 @@ class Workflow:
             raise ValueError("工作流缺少必填映射")
         if spec.inputs.keys() - {"prompt", "negative_prompt", "width", "height", "seed",
                                  "output_prefix", "image", "strength",
-                                 "pose_id", "garment_id"}:
+                                 "pose_id", "garment_id", "pose_steps", "garment_steps"}:
             raise ValueError("工作流包含未知映射")
         if set(spec.required_inputs) - spec.inputs.keys():
             raise ValueError("工作流必填输入不在映射表中")
@@ -118,6 +118,10 @@ class Workflow:
         for name, value in (("pose_id", request.pose_id), ("garment_id", request.garment_id)):
             if value is not None and name not in self.spec.inputs:
                 raise AppError(422, "UNSUPPORTED_PARAMETER", "此工作流不支持姿势/服装图库")
+        for name, value in (("pose_steps", request.pose_steps),
+                            ("garment_steps", request.garment_steps)):
+            if value is not None and name not in self.spec.inputs:
+                raise AppError(422, "UNSUPPORTED_PARAMETER", "此工作流不支持分段步数覆盖")
         if request.strength is not None and "strength" not in self.spec.inputs:
             raise AppError(422, "UNSUPPORTED_PARAMETER", "此工作流不支持重绘强度")
         if request.strength is not None and "image" not in self.spec.inputs:
@@ -147,6 +151,13 @@ class Workflow:
         for name, given in (("pose_id", request.pose_id), ("garment_id", request.garment_id)):
             if name in self.spec.inputs:
                 values[name] = given or ""
+        # 分段步数（pose-swap 1.1.0+）：None = 模板默认（8 步配 turbo）。
+        for name in ("pose_steps", "garment_steps"):
+            if name in self.spec.inputs:
+                node, field = self.spec.inputs[name]
+                given = getattr(request, name)
+                values[name] = (given if given is not None
+                                else self.graph[node]["inputs"][field])
         if "strength" in self.spec.inputs:
             node, field = self.spec.inputs["strength"]
             values["strength"] = (request.strength if request.strength is not None

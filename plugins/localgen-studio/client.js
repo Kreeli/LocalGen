@@ -12,6 +12,7 @@ window.__ModuleLoader__.load({
     const ROUTE_RAW = `${PREFIX}/raw`;
     const ROUTE_UPLOAD = `${PREFIX}/upload`;
 const ROUTE_OPEN = `${PREFIX}/open`;
+const ROUTE_OPEN_IMAGE = `${PREFIX}/open-image`;
 
     const PAGE_SIZE = 60;
     const POLL_MS = 2500;
@@ -72,8 +73,63 @@ const ROUTE_OPEN = `${PREFIX}/open`;
       return payload.data;
     }
 
+    // Re-stage a stored reference image so we get a fresh gateway-input token.
+    // 复用历史参数时不能直接重用旧的 token：`gateway-input/` 有 TTL，过期后
+    // 后端会用 422 INPUT_IMAGE_MISSING 拒绝提交（"输入图不存在或已过期"）。
+    // 任务附属物 `results/<job>/reference.png` 是永久副本，取回它的字节重新
+    // 上传一次，就能拿到一个此刻有效的 token。
+    async function restageReference(jobId) {
+      const response = await fetch(rawUrl(`/api/v1/jobs/${jobId}/attachments/reference`));
+      if (!response.ok) throw new Error(`取回参考图失败（HTTP ${response.status}）`);
+      const blob = await response.blob();
+      const file = new File([blob], 'reference.png', { type: 'image/png' });
+      return uploadReference(file);
+    }
+
+    // ── form persistence ────────────────────────────────────────────────────
+    // conversation.view unmounts this panel whenever the user switches to the
+    // chat/trajectory views, so React state alone loses the draft. Draft fields
+    // live in localStorage instead, which also survives a DSH restart.
+    const DRAFT_KEY = 'localgen-studio:draft:v1';
+
+    function readDraft() {
+      try {
+        const raw = window.localStorage.getItem(DRAFT_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function writeDraft(patch) {
+      try {
+        const next = { ...readDraft(), ...patch };
+        // Drop nulls/empties so the store stays small and clean.
+        for (const key of Object.keys(next)) {
+          if (next[key] === null || next[key] === undefined) delete next[key];
+        }
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify(next));
+      } catch {
+        // storage unavailable (private mode / quota) — drafts simply do not persist
+      }
+    }
+
     // Open the LocalGen desktop app: host probes health first, only spawns
     // when nothing is listening (InstanceLock would make a second launch fail).
+    // Ask the Host to fetch the artifact and open it with the OS default viewer.
+    async function openImage(apiPath, name) {
+      const response = await fetch(ROUTE_OPEN_IMAGE, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: apiPath, name }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((data && data.error && data.error.message) || ('HTTP ' + response.status));
+      return data;
+    }
+
     async function openLocalGen() {
       const response = await fetch(ROUTE_OPEN, { method: 'POST' });
       const data = await response.json().catch(() => null);
@@ -142,10 +198,16 @@ const ROUTE_OPEN = `${PREFIX}/open`;
 .lgs-btn { border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
 .lgs-btn:hover:not(:disabled) { border-color: var(--dsw-alias-brand-primary); }
 .lgs-btn:disabled { opacity: .45; cursor: not-allowed; }
-.lgs-btn-primary { background: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); color: #fff; font-weight: 600; padding: 9px 16px; width: 100%; font-size: 13px; }
+/* Primary action: filled with brand but with a guaranteed-readable label.
+   #fff breaks on light themes whose brand colour is light, so the label uses
+   the theme's own contrast pair and a 1.5px outline keeps the emphasis. */
+.lgs-btn-primary { background: var(--dsw-alias-brand-primary); border: 2px solid var(--dsw-alias-brand-primary); color: var(--dsw-alias-bg-base); font-weight: 700; padding: 9px 16px; width: 100%; font-size: 13px; text-shadow: none; }
 .lgs-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.lgs-btn-primary:disabled { opacity: .55; }
+/* Fallback for themes where the brand fill is too light for bg-base text. */
+.lgs-btn-primary[data-contrast="outline"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-brand-primary); }
 .lgs-btn-danger { color: var(--dsw-alias-state-error-primary); border-color: var(--dsw-alias-state-error-primary); }
-.lgs-btn-danger:hover:not(:disabled) { background: var(--dsw-alias-state-error-primary); color: #fff; }
+.lgs-btn-danger:hover:not(:disabled) { background: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-bg-base); }
 .lgs-slot { display: flex; align-items: center; gap: 10px; }
 .lgs-slot .lgs-thumb { width: 54px; height: 72px; border-radius: 8px; object-fit: cover; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l1); flex: none; }
 .lgs-slot .lgs-meta { flex: 1; min-width: 0; }
@@ -183,14 +245,14 @@ const ROUTE_OPEN = `${PREFIX}/open`;
 .lgs-tile .lgs-cap { padding: 5px 7px; font-size: 11px; line-height: 1.4; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lgs-tile .lgs-angles { display: flex; gap: 2px; padding: 0 6px 6px; flex-wrap: wrap; }
 .lgs-angle { font-size: 10px; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
-.lgs-angle[data-on="1"] { background: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); color: #fff; }
+.lgs-angle[data-on="1"] { background: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-bg-base); font-weight: 600; }
 .lgs-empty { padding: 40px 0; text-align: center; color: var(--dsw-alias-label-secondary); font-size: 12.5px; }
 .lgs-pill { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); }
 /* history */
 .lgs-hist { display: flex; flex-direction: column; gap: 10px; }
 .lgs-hist-item { display: flex; gap: 12px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; padding: 10px; background: var(--dsw-alias-bg-layer-1); cursor: pointer; align-items: flex-start; }
 .lgs-hist-item:hover { border-color: var(--dsw-alias-brand-primary); }
-.lgs-hist-thumb { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l1); flex: none; }
+.lgs-hist-thumb { width: 84px; height: 84px; border-radius: 8px; object-fit: cover; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l1); flex: none; }
 .lgs-hist-thumb.empty { display: flex; align-items: center; justify-content: center; color: var(--dsw-alias-label-secondary); font-size: 10px; text-align: center; }
 .lgs-hist-main { flex: 1; min-width: 0; }
 .lgs-hist-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -203,7 +265,7 @@ const ROUTE_OPEN = `${PREFIX}/open`;
 .lgs-detail-row .k { flex: none; width: 110px; color: var(--dsw-alias-label-secondary); }
 .lgs-detail-row .v { flex: 1; min-width: 0; word-break: break-word; }
 .lgs-detail-ref { margin-top: 10px; }
-.lgs-detail-ref img { max-width: 160px; max-height: 160px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l1); }
+.lgs-detail-ref img { max-width: 320px; max-height: 320px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l1); }
 /* settings */
 .lgs-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
 @media (max-width: 720px) { .lgs-settings-grid { grid-template-columns: minmax(0, 1fr); } }
@@ -262,6 +324,207 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         }
       }
       return Array.from(map.values());
+    }
+
+    // ── crop dialog (manual crop, ratio locked to the output size) ───────────
+    // The desktop app opens a Qt crop dialog before uploading; the plugin runs in
+    // a browser, so this reproduces the same interaction on a canvas: the box has
+    // the output aspect ratio, can be dragged and resized from its corners, and
+    // the crop happens client-side so the staged image is already the right shape.
+
+    function CropDialog({ file, target, onCancel, onDone }) {
+      const canvasRef = useRef(null);
+      const [img, setImg] = useState(null);
+      const [box, setBox] = useState({ x: 0, y: 0, w: 0, h: 0 });   // 归一化
+      const dragRef = useRef(null);
+      const [err, setErr] = useState('');
+
+      const targetW = target && target[0] ? target[0] : 768;
+      const targetH = target && target[1] ? target[1] : 768;
+      const ratio = targetW / targetH;
+
+      // load the picture and seed a centred max box
+      useEffect(() => {
+        let dead = false;
+        const url = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+          if (dead) return;
+          setImg(image);
+          const iw = image.naturalWidth || 1;
+          const ih = image.naturalHeight || 1;
+          let w = 1;
+          let h = (iw / ratio) / ih;
+          if (h > 1) { h = 1; w = (ih * ratio) / iw; }
+          setBox({ x: (1 - w) / 2, y: (1 - h) / 2, w, h });
+        };
+        image.onerror = () => { if (!dead) setErr('这个文件不是可读的图片'); };
+        image.src = url;
+        return () => { dead = true; URL.revokeObjectURL(url); };
+      }, [file, ratio]);
+
+      // draw preview
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !img) return;
+        const ctx = canvas.getContext('2d');
+        const cw = canvas.width;
+        const ch = canvas.height;
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.drawImage(img, 0, 0, cw, ch);
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        const bx = box.x * cw;
+        const by = box.y * ch;
+        const bw = box.w * cw;
+        const bh = box.h * ch;
+        ctx.fillRect(0, 0, cw, by);
+        ctx.fillRect(0, by + bh, cw, ch - by - bh);
+        ctx.fillRect(0, by, bx, bh);
+        ctx.fillRect(bx + bw, by, cw - bx - bw, bh);
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+        // thirds
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        for (let i = 1; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(bx + (bw * i) / 3, by);
+          ctx.lineTo(bx + (bw * i) / 3, by + bh);
+          ctx.moveTo(bx, by + (bh * i) / 3);
+          ctx.lineTo(bx + bw, by + (bh * i) / 3);
+          ctx.stroke();
+        }
+        // corner handles
+        ctx.fillStyle = 'rgba(64,160,255,1)';
+        for (const [hx, hy] of [[bx, by], [bx + bw, by], [bx, by + bh], [bx + bw, by + bh]]) {
+          ctx.fillRect(hx - 4, hy - 4, 8, 8);
+        }
+      }, [img, box]);
+
+      const toNorm = (event) => {
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: (event.clientX - rect.left) / rect.width,
+          y: (event.clientY - rect.top) / rect.height,
+        };
+      };
+
+      const hitHandle = (pt) => {
+        const tol = 0.03;
+        const near = (a, b) => Math.abs(a - b) < tol;
+        if (near(pt.x, box.x) && near(pt.y, box.y)) return 'nw';
+        if (near(pt.x, box.x + box.w) && near(pt.y, box.y)) return 'ne';
+        if (near(pt.x, box.x) && near(pt.y, box.y + box.h)) return 'sw';
+        if (near(pt.x, box.x + box.w) && near(pt.y, box.y + box.h)) return 'se';
+        if (pt.x > box.x && pt.x < box.x + box.w && pt.y > box.y && pt.y < box.y + box.h) return 'move';
+        return null;
+      };
+
+      const onDown = (event) => {
+        const pt = toNorm(event);
+        const hit = hitHandle(pt);
+        if (!hit) return;
+        dragRef.current = { hit, start: pt, from: { ...box } };
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      };
+
+      const onMove = (event) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        const pt = toNorm(event);
+        const dx = pt.x - drag.start.x;
+        const dy = pt.y - drag.start.y;
+        const from = drag.from;
+        if (drag.hit === 'move') {
+          setBox({
+            ...from,
+            x: Math.min(1 - from.w, Math.max(0, from.x + dx)),
+            y: Math.min(1 - from.h, Math.max(0, from.y + dy)),
+          });
+          return;
+        }
+        // resize from a corner, keeping the aspect ratio locked
+        const anchorX = drag.hit.includes('w') ? from.x + from.w : from.x;
+        const anchorY = drag.hit.includes('n') ? from.y + from.h : from.y;
+        const px = drag.hit.includes('w') ? pt.x : pt.x;
+        let w = Math.abs(px - anchorX);
+        let h = w / ratio;
+        const availH = drag.hit.includes('n') ? anchorY : 1 - anchorY;
+        const availW = drag.hit.includes('w') ? anchorX : 1 - anchorX;
+        if (h > availH) { h = availH; w = h * ratio; }
+        if (w > availW) { w = availW; h = w / ratio; }
+        w = Math.max(0.05, Math.min(w, availW));
+        h = w / ratio;
+        setBox({
+          x: drag.hit.includes('w') ? anchorX - w : anchorX,
+          y: drag.hit.includes('n') ? anchorY - h : anchorY,
+          w,
+          h,
+        });
+      };
+
+      const onUp = () => { dragRef.current = null; };
+
+      const cropAndUpload = async () => {
+        if (!img) return;
+        setErr('');
+        try {
+          const iw = img.naturalWidth;
+          const ih = img.naturalHeight;
+          const sx = Math.round(box.x * iw);
+          const sy = Math.round(box.y * ih);
+          const sw = Math.max(1, Math.round(box.w * iw));
+          const sh = Math.max(1, Math.round(box.h * ih));
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH);
+          const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+          if (!blob) throw new Error('无法生成裁切后的图片');
+          const cropped = new File([blob], 'reference.png', { type: 'image/png' });
+          onDone(cropped, { sx, sy, sw, sh, iw, ih });
+        } catch (failure) {
+          setErr(String(failure && failure.message ? failure.message : failure));
+        }
+      };
+
+      return h('div', { className: 'lgs-overlay', role: 'dialog', 'aria-label': '裁切参考图', onMouseDown: (e) => { if (e.target === e.currentTarget) onCancel(); } },
+        h('div', { className: 'lgs-modal', style: { width: 'min(860px, 94vw)', height: 'min(760px, 92vh)' } },
+          h('div', { className: 'lgs-modal-head' },
+            h('h3', null, '裁切参考图'),
+            h('span', { className: 'lgs-pill' }, targetW + ' × ' + targetH),
+            h('span', { style: { flex: 1 } }),
+            h('button', { className: 'lgs-btn', onClick: onCancel }, '取消')
+          ),
+          h('div', { style: { flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'var(--dsw-alias-bg-layer-2)' } },
+            h('canvas', {
+              ref: canvasRef,
+              width: 720,
+              height: 560,
+              style: { maxWidth: '100%', maxHeight: '100%', cursor: 'crosshair', touchAction: 'none' },
+              onPointerDown: onDown,
+              onPointerMove: onMove,
+              onPointerUp: onUp,
+              onPointerLeave: onUp,
+            })
+          ),
+          h('div', { style: { padding: '10px 16px 14px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
+            img
+              ? h('div', { className: 'lgs-note' },
+                '原图 ' + img.naturalWidth + ' × ' + img.naturalHeight +
+                ' → 裁切 ' + Math.round(box.w * img.naturalWidth) + ' × ' + Math.round(box.h * img.naturalHeight) +
+                ' → 输出 ' + targetW + ' × ' + targetH + '（比例锁定，只裁不拉）')
+              : h('div', { className: 'lgs-note' }, err || '正在读取图片…'),
+            err ? h('div', { className: 'lgs-error', style: { marginTop: 6 } }, err) : null,
+            h('div', { className: 'lgs-row', style: { marginTop: 10 } },
+              h('button', { className: 'lgs-btn lgs-btn-primary', style: { flex: 1 }, disabled: !img, onClick: cropAndUpload }, '裁切并上传'),
+              h('button', { className: 'lgs-btn', onClick: onCancel }, '取消')
+            )
+          )
+        )
+      );
     }
 
     function Picker({ kind, selectedId, onPick, onClose }) {
@@ -423,7 +686,7 @@ const ROUTE_OPEN = `${PREFIX}/open`;
      */
     function GeneratePanel({ state, fillRef, onJobsChanged, pendingFill, onFillConsumed, onSubmitted }) {
       const [workflows, setWorkflows] = useState([]);
-      const [workflow, setWorkflow] = useState('');
+      const [workflow, setWorkflow] = useState(() => readDraft().workflow || '');
       const [workflowError, setWorkflowError] = useState('');
       const [workflowLoading, setWorkflowLoading] = useState(false);
 
@@ -455,19 +718,53 @@ const ROUTE_OPEN = `${PREFIX}/open`;
       useEffect(() => {
         loadWorkflows();
       }, [loadWorkflows]);
-      const [size, setSize] = useState('');
-      const [seed, setSeed] = useState('');
-      const [negative, setNegative] = useState('');
-      const [steps, setSteps] = useState('');
-      const [cfg, setCfg] = useState('');
-      const [prompt, setPrompt] = useState('');
 
-      const [pose, setPose] = useState(null);
-      const [garment, setGarment] = useState(null);
+      useEffect(() => {
+        if (workflow) writeDraft({ workflow });
+      }, [workflow]);
+      // Draft fields are seeded from localStorage so switching to another
+      // conversation.view (chat / trajectory) or restarting DSH keeps them.
+      const draft = useRef(null);
+      if (draft.current === null) draft.current = readDraft();
+      const seedDraft = draft.current;
+
+      const [size, setSize] = useState(seedDraft.size || '');
+      const [seed, setSeed] = useState(seedDraft.seed || '');
+      const [negative, setNegative] = useState(seedDraft.negative || '');
+      const [steps, setSteps] = useState(seedDraft.steps || '');
+      const [cfg, setCfg] = useState(seedDraft.cfg || '');
+      const [prompt, setPrompt] = useState(seedDraft.prompt || '');
+      // 两段式分段步数（pose-swap 1.1.0+）：留空 = 模板默认 8 步配 turbo 预设。
+      const [poseSteps, setPoseSteps] = useState(seedDraft.poseSteps || '');
+      const [garmentSteps, setGarmentSteps] = useState(seedDraft.garmentSteps || '');
+
+      const [pose, setPose] = useState(seedDraft.pose || null);
+      const [garment, setGarment] = useState(seedDraft.garment || null);
       const [picker, setPicker] = useState(null);
-      const [reference, setReference] = useState(null);
-      const [strength, setStrength] = useState('');
+      const [reference, setReference] = useState(() => {
+        const saved = seedDraft.reference;
+        if (!saved || !saved.name) return null;
+        // blob: 预览刷新后必死，但任务附属物 URL 和 originJobId 都能活 —— 存的是
+        // 服务端路径而不是内存句柄，所以预览可以一起恢复。
+        const preview = saved.preview && !String(saved.preview).startsWith('blob:')
+          ? saved.preview
+          : (saved.originJobId ? rawUrl(`/api/v1/jobs/${saved.originJobId}/attachments/reference`) : null);
+        return {
+          name: saved.name,
+          label: saved.label || saved.name,
+          preview,
+          previewKind: preview ? (saved.previewKind || 'attachment') : 'token',
+          originJobId: saved.originJobId || null,
+        };
+      });
+      const [strength, setStrength] = useState(seedDraft.strength || '');
       const [uploading, setUploading] = useState(false);
+      const [cropFile, setCropFile] = useState(null);
+
+      // Persist the draft on every change so an unmount never loses it.
+      useEffect(() => {
+        writeDraft({ size, seed, negative, steps, cfg, prompt, strength, pose, garment, reference, poseSteps, garmentSteps });
+      }, [size, seed, negative, steps, cfg, prompt, strength, pose, garment, reference, poseSteps, garmentSteps]);
 
       const [submitting, setSubmitting] = useState(false);
       const [jobId, setJobId] = useState(null);
@@ -489,6 +786,11 @@ const ROUTE_OPEN = `${PREFIX}/open`;
       const supportsGarment = supports.includes('garment_id');
       const supportsNegative = supports.includes('negative_prompt');
       const supportsStrength = supports.includes('strength');
+      // 分段步数（pose-swap 1.1.0+）：姿势段 / 换装段各自的扩散步数。
+      // 两个都声明才认为支持两段式覆盖（同时选姿势+服装才有两段可调）。
+      const supportsPoseSteps = supports.includes('pose_steps');
+      const supportsGarmentSteps = supports.includes('garment_steps');
+      const supportsStageSteps = supportsPoseSteps && supportsGarmentSteps;
       // A workflow that REQUIRES a reference image (kontext-dev). "Supports"
       // image (moss/qwen) does NOT make it mandatory.
       const requiredImage = required.includes('image');
@@ -516,10 +818,20 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         if (fill.steps != null) setSteps(String(fill.steps));
         if (fill.cfg_scale != null) setCfg(String(fill.cfg_scale));
         if (fill.strength != null) setStrength(String(fill.strength));
+        if (fill.pose_steps != null) setPoseSteps(String(fill.pose_steps));
+        if (fill.garment_steps != null) setGarmentSteps(String(fill.garment_steps));
         if (fill.pose) setPose(fill.pose);
         if (fill.garment) setGarment(fill.garment);
         if (fill.imageToken != null) {
-          setReference({ name: fill.imageToken, label: fill.imageToken, preview: null });
+          // 提交用 token；预览优先用任务附属物（永久），取不到再把 token 显示成文字。
+          // 这样"复用参数/参数复制"看得见当初那张图，而不是一个空框。
+          setReference({
+            name: fill.imageToken,
+            label: '已回填参考图',
+            preview: fill.imagePreview || null,
+            previewKind: fill.imagePreview ? 'attachment' : 'token',
+            originJobId: fill.jobId || null,
+          });
         }
       }, []);
 
@@ -537,7 +849,7 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         if (onFillConsumed) onFillConsumed();
         if (__rerun) {
           const wfInfo = workflows.find((item) => item.workflow_id === fill.workflow_id) || null;
-          doSubmit(buildBodyFromFill(fill, wfInfo));
+          doSubmit(buildBodyFromFill(fill, wfInfo), fill.jobId || null);
         }
       }, [pendingFill, workflows.length]);
 
@@ -565,16 +877,28 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         return () => { cancelled = true; if (timer) clearTimeout(timer); };
       }, [jobId]);
 
-      const onPickFile = async (event) => {
+      // Picking a file opens the crop dialog first (like the desktop app), so a
+      // 3:2 photo is cropped to the output ratio here instead of being squashed
+      // server-side.
+      const onPickFile = (event) => {
         const file = event.target.files && event.target.files[0];
         event.target.value = '';
         if (!file) return;
+        setCropFile(file);
+      };
+
+      const onCropped = async (croppedFile, info) => {
+        setCropFile(null);
         setUploading(true);
         setError('');
         try {
-          const data = await uploadReference(file);
-          const preview = URL.createObjectURL(file);
-          setReference({ name: data.name, label: file.name || data.name, preview });
+          const data = await uploadReference(croppedFile);
+          const preview = URL.createObjectURL(croppedFile);
+          setReference({
+            name: data.name,
+            label: '已裁切 ' + info.sw + '×' + info.sh + ' → ' + (parseSizeKey(size) || [768, 768]).join('×'),
+            preview,
+          });
         } catch (failure) {
           setError(String(failure && failure.message ? failure.message : failure));
         } finally {
@@ -589,12 +913,13 @@ const ROUTE_OPEN = `${PREFIX}/open`;
 
       // client-side validation of steps / cfg
       const stepsError = useMemo(() => {
+        if (supportsStageSteps) return '';   // 分段模式：通用步数框隐藏，残留值不参与校验
         if (steps === '') return '';
         const value = Number(steps);
         if (!Number.isInteger(value)) return '步数必须是整数';
         if (value < 1 || value > 25) return '步数范围 1–25';
         return '';
-      }, [steps]);
+      }, [steps, supportsStageSteps]);
       const cfgError = useMemo(() => {
         if (cfg === '') return '';
         const value = Number(cfg);
@@ -602,6 +927,16 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         if (value < 1 || value > 15) return 'CFG 范围 1–15';
         return '';
       }, [cfg]);
+      // 分段步数：空 = 模板默认；非空时必须是 1–25 的整数（后端 Steps 同一区间）。
+      const stageStepsError = useMemo(() => {
+        for (const [label, raw] of [['姿势段', poseSteps], ['换装段', garmentSteps]]) {
+          if (raw === '') continue;
+          const value = Number(raw);
+          if (!Number.isInteger(value)) return `${label}步数必须是整数`;
+          if (value < 1 || value > 25) return `${label}步数范围 1–25`;
+        }
+        return '';
+      }, [poseSteps, garmentSteps]);
 
       // Force a reference only when the workflow REQUIRES image (kontext-dev),
       // or when it has pose/garment inputs (pose-swap) which need at least one
@@ -611,7 +946,7 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         && Boolean(workflow)
         && (!needsRefInput || Boolean(reference || pose || garment))
         && !submitting && state && state.tokenConfigured
-        && !stepsError && !cfgError;
+        && !stepsError && !cfgError && !stageStepsError;
 
       const disabledReason = useMemo(() => {
         if (!state) return '连接状态未加载';
@@ -623,17 +958,38 @@ const ROUTE_OPEN = `${PREFIX}/open`;
         }
         if (stepsError) return stepsError;
         if (cfgError) return cfgError;
+        if (stageStepsError) return stageStepsError;
         if (submitting) return '正在提交';
         return '';
-      }, [state, workflow, prompt, reference, pose, garment, needsRefInput, stepsError, cfgError, submitting]);
+      }, [state, workflow, prompt, reference, pose, garment, needsRefInput, stepsError, cfgError, stageStepsError, submitting]);
 
-      const doSubmit = async (body) => {
+      const doSubmit = async (body, originJobId) => {
         setError('');
         setJob(null);
         setJobId(null);
         setSubmitting(true);
         try {
-          const job0 = await callApi('/api/v1/jobs', 'POST', body);
+          let payload = body;
+          let job0 = null;
+          // rerun 会在 applyFill 之后同步调用本函数，此时 reference 闭包还是旧值，
+          // 所以来源任务 id 由调用方显式传进来，别读 state。
+          const sourceJob = originJobId || (reference && reference.originJobId) || null;
+          try {
+            job0 = await callApi('/api/v1/jobs', 'POST', payload);
+          } catch (failure) {
+            // token 过期（gateway-input 有 TTL）：附属物是永久副本，用它换一个新
+            // token 后自动重试一次，用户不该为了"复用历史参数"手动重新选图。
+            if (failure.code === 'INPUT_IMAGE_MISSING' && sourceJob) {
+              const fresh = await restageReference(sourceJob);
+              payload = { ...payload, image: fresh.name };
+              setReference((prev) => (prev
+                ? { ...prev, name: fresh.name, originJobId: sourceJob }
+                : { name: fresh.name, label: '已回填参考图', preview: rawUrl(`/api/v1/jobs/${sourceJob}/attachments/reference`), previewKind: 'attachment', originJobId: sourceJob }));
+              job0 = await callApi('/api/v1/jobs', 'POST', payload);
+            } else {
+              throw failure;
+            }
+          }
           setJob(job0);
           setStartedAt(Date.now());
           setJobId(job0.job_id);
@@ -671,8 +1027,14 @@ const ROUTE_OPEN = `${PREFIX}/open`;
           const value = Number(strength);
           if (Number.isFinite(value) && value > 0 && value <= 1) body.strength = value;
         }
-        if (steps.trim() !== '') body.steps = Number(steps);
+        // 分段模式下通用步数框已隐藏，不再发送 —— 否则草稿里残留的旧值会
+        // 变成两段的共同基线，用户看不见却生效，正是要消除的误导。
+        if (!supportsStageSteps && steps.trim() !== '') body.steps = Number(steps);
         if (cfg.trim() !== '') body.cfg_scale = Number(cfg);
+        // 分段步数：只在工作流声明了该输入、且用户真的填了时才传。
+        // 不传 = 后端回落到 steps / 模板默认（pose-swap 1.1.0 起 15 步）。
+        if (supportsPoseSteps && poseSteps.trim() !== '') body.pose_steps = Number(poseSteps);
+        if (supportsGarmentSteps && garmentSteps.trim() !== '') body.garment_steps = Number(garmentSteps);
         await doSubmit(body);
       };
 
@@ -693,8 +1055,16 @@ const ROUTE_OPEN = `${PREFIX}/open`;
           const value = Number(fill.strength);
           if (Number.isFinite(value) && value > 0 && value <= 1) body.strength = value;
         }
-        if (fill.steps != null && String(fill.steps) !== '') body.steps = Number(fill.steps);
+        // 分段模式下通用 steps 不再参与（控件已隐藏），只走分段步数。
+        const stageMode = supports.includes('pose_steps') && supports.includes('garment_steps');
+        if (!stageMode && fill.steps != null && String(fill.steps) !== '') body.steps = Number(fill.steps);
         if (fill.cfg_scale != null && String(fill.cfg_scale) !== '') body.cfg_scale = Number(fill.cfg_scale);
+        if (supports.includes('pose_steps') && fill.pose_steps != null && String(fill.pose_steps) !== '') {
+          body.pose_steps = Number(fill.pose_steps);
+        }
+        if (supports.includes('garment_steps') && fill.garment_steps != null && String(fill.garment_steps) !== '') {
+          body.garment_steps = Number(fill.garment_steps);
+        }
         // rerun = fresh random seed: omit seed so the service generates one
         return body;
       };
@@ -718,6 +1088,8 @@ const ROUTE_OPEN = `${PREFIX}/open`;
 
       const stepsPlaceholder = templateSteps != null ? `默认 ${templateSteps}` : '留空用模板默认';
       const cfgPlaceholder = templateCfg != null ? `默认 ${templateCfg}` : '留空用模板默认';
+      // 分段步数占位跟着模板默认走（pose-swap 1.1.0 起是 15 步），不写死数字。
+      const stageStepsPlaceholder = templateSteps != null ? `默认(${templateSteps})` : '默认';
 
       return h('div', { className: 'lgs-grid2' },
         h('div', null,
@@ -751,10 +1123,14 @@ const ROUTE_OPEN = `${PREFIX}/open`;
                 h('label', { className: 'lgs-label' }, '种子'),
                 h('input', { className: 'lgs-input', value: seed, onChange: (event) => setSeed(event.target.value), placeholder: '留空随机' })
               ),
-              h('div', { style: { flex: 1 } },
-                h('label', { className: 'lgs-label' }, '步数'),
-                h('input', { className: 'lgs-input', value: steps, onChange: (event) => setSteps(event.target.value), placeholder: stepsPlaceholder })
-              ),
+              // 通用步数框在分段模式下隐藏：pose_steps/garment_steps 已覆盖它，
+              // 留着会让用户误以为还能单独调全局基线（它的值会同时喂给两段）。
+              supportsStageSteps
+                ? null
+                : h('div', { style: { flex: 1 } },
+                  h('label', { className: 'lgs-label' }, '步数'),
+                  h('input', { className: 'lgs-input', value: steps, onChange: (event) => setSteps(event.target.value), placeholder: stepsPlaceholder })
+                ),
               h('div', { style: { flex: 1 } },
                 h('label', { className: 'lgs-label' }, 'CFG'),
                 h('input', { className: 'lgs-input', value: cfg, onChange: (event) => setCfg(event.target.value), placeholder: cfgPlaceholder })
@@ -763,8 +1139,41 @@ const ROUTE_OPEN = `${PREFIX}/open`;
             (stepsError || cfgError)
               ? h('div', { className: 'lgs-error', style: { marginTop: 6 } }, stepsError || cfgError)
               : null,
+            supportsStageSteps
+              ? h('div', { style: { marginTop: 12 } },
+                h('div', { className: 'lgs-row' },
+                  h('div', { style: { flex: 1 } },
+                    h('label', { className: 'lgs-label' }, '姿势段步数'),
+                    h('input', {
+                      className: 'lgs-input',
+                      value: poseSteps,
+                      onChange: (event) => setPoseSteps(event.target.value),
+                      placeholder: stageStepsPlaceholder,
+                    })
+                  ),
+                  h('div', { style: { flex: 1 } },
+                    h('label', { className: 'lgs-label' }, '换装段步数'),
+                    h('input', {
+                      className: 'lgs-input',
+                      value: garmentSteps,
+                      onChange: (event) => setGarmentSteps(event.target.value),
+                      placeholder: stageStepsPlaceholder,
+                    })
+                  )
+                ),
+                stageStepsError
+                  ? h('div', { className: 'lgs-error', style: { marginTop: 6 } }, stageStepsError)
+                  : null,
+                h('div', { className: 'lgs-note', style: { marginTop: 6 } },
+                  pose && garment
+                    ? `已同时选中姿势与服装 → 引擎分两段跑：先摆姿势，再换装。留空 = 各 ${templateSteps != null ? templateSteps : '模板默认'} 步。`
+                    : '同时选中姿势 + 服装才走两段式；只选其一时按单段跑，此处留空即可。')
+              )
+              : null,
             h('div', { className: 'lgs-note', style: { marginTop: 8 } },
-              '留空使用模型原始参数；步数超过 8 时 turbo 加速档自动停用。'),
+              supportsStageSteps
+                ? `留空 = 两段各用模板默认${templateSteps != null ? ` ${templateSteps} 步` : ''}；分段步数单独覆盖，互不影响。`
+                : '留空使用模型原始参数；步数超过 8 时 turbo 加速档自动停用。'),
             supportsNegative
               ? h('div', null,
                 h('label', { className: 'lgs-label' }, '负面提示词'),
@@ -784,8 +1193,16 @@ const ROUTE_OPEN = `${PREFIX}/open`;
                       ? h('img', { className: 'lgs-thumb', alt: '参考图', src: reference.preview })
                       : h('div', { className: 'lgs-thumb', style: { display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, reference.name),
                     h('div', { className: 'lgs-meta' },
-                      h('div', { className: 'lgs-name' }, reference.preview ? reference.label : '已回填参考图 token'),
-                      h('div', { className: 'lgs-hint' }, reference.preview ? '已上传，将作为人物参考' : reference.name),
+                      h('div', { className: 'lgs-name' },
+                        reference.preview
+                          ? reference.label
+                          : (reference.originJobId ? '已回填参考图' : '已回填参考图 token')),
+                      h('div', { className: 'lgs-hint' },
+                        reference.preview
+                          ? (reference.previewKind === 'attachment'
+                            ? '取自历史任务的样张，提交时会自动转成新上传'
+                            : '已上传，将作为人物参考')
+                          : reference.name),
                       h('div', { className: 'lgs-row', style: { marginTop: 6 } },
                         h('button', { className: 'lgs-btn', onClick: () => fileRef.current && fileRef.current.click() }, '更换'),
                         h('button', { className: 'lgs-btn', onClick: clearReference }, '清除')
@@ -914,6 +1331,14 @@ const ROUTE_OPEN = `${PREFIX}/open`;
             : null
         ),
 
+        cropFile
+          ? h(CropDialog, {
+            file: cropFile,
+            target: parseSizeKey(size) || [768, 768],
+            onCancel: () => setCropFile(null),
+            onDone: onCropped,
+          })
+          : null,
         picker
           ? h(Picker, {
             kind: picker,
@@ -1025,7 +1450,15 @@ const ROUTE_OPEN = `${PREFIX}/open`;
           steps: params.steps != null ? String(params.steps) : '',
           cfg_scale: params.cfg_scale != null ? String(params.cfg_scale) : '',
           strength: params.strength != null ? String(params.strength) : '',
+          pose_steps: params.pose_steps != null ? String(params.pose_steps) : '',
+          garment_steps: params.garment_steps != null ? String(params.garment_steps) : '',
           imageToken: params.image || null,
+          // 参考图回看用任务附属物（永久有效），提交仍用 gateway-input token。
+          // 两者分开：token 会被 TTL 清掉，附属物不会。
+          imagePreview: params.image
+            ? rawUrl(`/api/v1/jobs/${job.job_id}/attachments/reference`)
+            : null,
+          jobId: job.job_id,
           pose: null,
           garment: null,
         };
@@ -1050,6 +1483,8 @@ const ROUTE_OPEN = `${PREFIX}/open`;
           h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '创建'), h('span', { className: 'v' }, fmtTime(job.created_at))),
           params.seed != null ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '种子'), h('span', { className: 'v' }, String(params.seed))) : null,
           params.steps != null ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '步数'), h('span', { className: 'v' }, String(params.steps))) : null,
+          params.pose_steps != null ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '姿势段步数'), h('span', { className: 'v' }, String(params.pose_steps))) : null,
+          params.garment_steps != null ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '换装段步数'), h('span', { className: 'v' }, String(params.garment_steps))) : null,
           params.cfg_scale != null ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, 'CFG'), h('span', { className: 'v' }, String(params.cfg_scale))) : null,
           params.strength != null ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '强度'), h('span', { className: 'v' }, String(params.strength))) : null,
           params.width ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '尺寸'), h('span', { className: 'v' }, `${params.width} × ${params.height}`)) : null,
@@ -1058,7 +1493,19 @@ const ROUTE_OPEN = `${PREFIX}/open`;
             ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '负面'), h('span', { className: 'v' }, params.negative_prompt))
             : null,
           params.image
-            ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '参考图'), h('span', { className: 'v' }, params.image))
+            ? h('div', { className: 'lgs-detail-row' },
+              h('span', { className: 'k' }, '参考图'),
+              h('span', { className: 'v' }, params.image),
+              h('img', {
+                alt: '参考图',
+                title: '任务保存的参考图副本（点击用系统查看器打开）',
+                className: 'lgs-thumb',
+                style: { width: 56, height: 56, cursor: 'zoom-in', marginTop: 4 },
+                src: rawUrl(`/api/v1/jobs/${job.job_id}/attachments/reference`),
+                onClick: () => openImage(`/api/v1/jobs/${job.job_id}/attachments/reference`,
+                  'LocalGen-ref-' + String(job.job_id).slice(0, 8) + '.png'),
+                onError: (event) => { event.currentTarget.style.display = 'none'; },
+              }))
             : null,
           params.pose_id
             ? h('div', { className: 'lgs-detail-row' }, h('span', { className: 'k' }, '姿势'), h('span', { className: 'v' }, params.pose_id))
@@ -1071,7 +1518,14 @@ const ROUTE_OPEN = `${PREFIX}/open`;
             : null,
           artifact
             ? h('div', { className: 'lgs-detail-ref' },
-              h('img', { alt: '成品', src: rawUrl(artifact.download_path) }))
+              h('img', {
+                alt: '成品',
+                title: '点击用系统查看器打开原图',
+                style: { cursor: 'zoom-in' },
+                src: rawUrl(artifact.download_path),
+                onClick: () => openImage(artifact.download_path, 'LocalGen-' + String(job.job_id).slice(0, 8) + '.png')
+                  .catch((failure) => setError('打开图片失败：' + (failure.message || failure))),
+              }))
             : null
         );
       };
@@ -1096,7 +1550,19 @@ const ROUTE_OPEN = `${PREFIX}/open`;
                   onClick: () => setExpanded(expanded === job.job_id ? null : job.job_id),
                 },
                   artifact
-                    ? h('img', { className: 'lgs-hist-thumb', alt: '', src: rawUrl(artifact.download_path) })
+                    ? h('img', {
+                      className: 'lgs-hist-thumb',
+                      alt: '点击用系统查看器打开原图',
+                      title: '点击用系统查看器打开原图',
+                      style: { cursor: 'zoom-in' },
+                      src: rawUrl(artifact.download_path),
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        openImage(artifact.download_path, 'LocalGen-' + String(job.job_id).slice(0, 8) + '.png')
+                          .then(() => setNotice('已用系统查看器打开'))
+                          .catch((failure) => setError('打开图片失败：' + (failure.message || failure)));
+                      },
+                    })
                     : h('div', { className: 'lgs-hist-thumb empty' }, STATUS_TEXT[job.status] || job.status),
                   h('div', { className: 'lgs-hist-main' },
                     h('div', { className: 'lgs-hist-top' },

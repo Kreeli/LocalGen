@@ -31,6 +31,7 @@ const ROUTE_RPC = `${PREFIX}/rpc`;
 const ROUTE_RAW = `${PREFIX}/raw`;
 const ROUTE_UPLOAD = `${PREFIX}/upload`;
 const ROUTE_OPEN = `${PREFIX}/open`;
+const ROUTE_OPEN_IMAGE = `${PREFIX}/open-image`;
 
 const DEFAULT_BASE = 'http://127.0.0.1:12138';
 const DEFAULT_EXE = 'D:\\garbage pile\\local_image\\dist\\LocalGen\\LocalGen.exe';
@@ -298,6 +299,41 @@ export function apply(ctx) {
         sendText(res, 500, String(error && error.message ? error.message : error));
       }
     }, 'localgen-studio: open route');
+
+    // Download one artifact through the token'd proxy into a temp file and hand
+    // it to the OS default viewer. The browser cannot launch a local app, and
+    // <a download> would only save it, so this runs on the Host side.
+    route(ROUTE_OPEN_IMAGE, async (req, res) => {
+      if (!sameOrigin(req)) return sendText(res, 403, 'origin rejected');
+      if (req.method !== 'POST') return sendText(res, 405, 'method not allowed');
+      try {
+        const body = JSON.parse((await readBody(req, JSON_LIMIT)).toString('utf8') || '{}');
+        const apiPath = safeApiPath(body.path);
+        if (!apiPath) return sendText(res, 400, '只允许打开 /api/v1/ 下的图片');
+        const { token, baseUrl } = await resolve(ctx);
+        if (!token) return sendJson(res, 428, { error: { code: 'TOKEN_MISSING', message: '还没有配置 LocalGen 访问令牌' } });
+        const upstream = await fetch(baseUrl + apiPath, {
+          headers: authHeaders(token),
+          signal: AbortSignal.timeout(RAW_TIMEOUT_MS),
+        });
+        if (!upstream.ok) {
+          return sendJson(res, 502, { error: { message: '下载图片失败：HTTP ' + upstream.status } });
+        }
+        const bytes = Buffer.from(await upstream.arrayBuffer());
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'localgen-studio-'));
+        const name = (typeof body.name === 'string' && /^[\w.-]{1,80}$/.test(body.name)) ? body.name : 'localgen.png';
+        const file = path.join(dir, name);
+        await fs.writeFile(file, bytes);
+        const child = spawn(process.env.COMSPEC || 'cmd.exe', ['/c', 'start', '', file], {
+          detached: true, stdio: 'ignore', windowsHide: true,
+        });
+        child.on('error', () => {});
+        child.unref();
+        return sendJson(res, 200, { status: 'opened', file });
+      } catch (error) {
+        sendText(res, 500, String(error && error.message ? error.message : error));
+      }
+    }, 'localgen-studio: open-image route');
 
     route(ROUTE_RPC, async (req, res) => {
       if (!sameOrigin(req)) return sendText(res, 403, 'origin rejected');

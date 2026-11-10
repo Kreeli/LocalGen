@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from localgen.config import Settings, save_settings
+from localgen.storage.images import GARMENT_NAME, POSE_NAME
 
 from .client import Client
 from .reference import ReferencePicker
@@ -265,6 +266,28 @@ class Window(QMainWindow):
         strength_layout.addWidget(self.strength_slider)
         layout.addWidget(self.strength_box)
         self.strength_box.setVisible(False)
+        # 两段式（姿势+服装同时选中）的分段步数：0 = 跟随模板默认（8 步 turbo）。
+        # 只在支持的工作流（pose-swap 1.1.0+）出现；调高后引擎自动弃用 turbo 预设。
+        self.stage_steps_box = QWidget()
+        steps_layout = QHBoxLayout(self.stage_steps_box)
+        steps_layout.setContentsMargins(0, 2, 0, 0)
+        steps_layout.setSpacing(6)
+        steps_layout.addWidget(label("分段步数", "caption"))
+        self.pose_steps_spin = QSpinBox()
+        self.pose_steps_spin.setRange(0, 25)
+        self.pose_steps_spin.setSpecialValueText("默认")
+        self.pose_steps_spin.setPrefix("姿势 ")
+        self.pose_steps_spin.setToolTip("姿势段步数：默认 15；8 步出图偏模糊，调低会更快但更糊")
+        steps_layout.addWidget(self.pose_steps_spin)
+        self.garment_steps_spin = QSpinBox()
+        self.garment_steps_spin.setRange(0, 25)
+        self.garment_steps_spin.setSpecialValueText("默认")
+        self.garment_steps_spin.setPrefix("换装 ")
+        self.garment_steps_spin.setToolTip("换装段步数：默认 15；服装是局部编辑，跟姿势段保持一致即可")
+        steps_layout.addWidget(self.garment_steps_spin)
+        steps_layout.addStretch()
+        layout.addWidget(self.stage_steps_box)
+        self.stage_steps_box.setVisible(False)
         layout.addStretch()
         scroll = QScrollArea()
         scroll.setObjectName("editor")
@@ -484,6 +507,18 @@ class Window(QMainWindow):
         layout.addWidget(self.reference_block)
         self.reference_block.setVisible(False)
         self.reference_source = None
+        # 姿势 / 服装：图库随时可能被重新导入或删掉，历史里要能一直看到
+        # "当时选的是哪一张"（用户反馈：历史记录里看不到姿势和服装的图）。
+        # 两张缩略图竖着排 —— 详情栏最窄只有 280 px，横排会把说明挤成一条缝。
+        self.library_block = QWidget()
+        library_layout = QVBoxLayout(self.library_block)
+        library_layout.setContentsMargins(0, 0, 0, 0)
+        library_layout.setSpacing(6)
+        self.pose_thumb, self.pose_caption = self.library_row(library_layout, "姿势")
+        self.garment_thumb, self.garment_caption = self.library_row(library_layout, "服装")
+        layout.addWidget(self.library_block)
+        self.library_block.setVisible(False)
+        self.library_source = {}
         # 提示词整块只在有选中任务时出现：平时把纵向空间全留给列表。
         self.prompt_block = QWidget()
         prompt_layout = QVBoxLayout(self.prompt_block)
@@ -770,6 +805,8 @@ class Window(QMainWindow):
                 setattr(self, attribute, picker)
             if picker is not None:
                 picker.setVisible(needs)
+        # 分段步数：两段式（姿势+服装）才有意义，能力声明驱动显隐。
+        self.stage_steps_box.setVisible("pose_steps" in supported)
 
     def controls(self):
         if not hasattr(self, "generate"):
@@ -821,6 +858,11 @@ class Window(QMainWindow):
                 chosen = picker.selected_id()
                 if chosen:
                     payload[name] = chosen
+        # 分段步数：0 = 模板默认（8 步 turbo），不进 payload。
+        for name, spin in (("pose_steps", self.pose_steps_spin),
+                           ("garment_steps", self.garment_steps_spin)):
+            if name in supported and spin.value() > 0:
+                payload[name] = int(spin.value())
         if self.idempotency is None or self.idempotency[0] != payload:
             self.idempotency = payload, uuid4().hex
         self.submitting = True
@@ -1063,6 +1105,11 @@ class Window(QMainWindow):
             extras.append(f"重绘强度 {float(parameters['strength']):.2f}")
         if extras:
             lines.append("  ·  ".join(extras))
+        # 图库参考单独一行：两个编号都不短，挤进上一行会破 60 字的读行长度。
+        picked = [f"{title} {parameters[key]}" for key, title in
+                  (("pose_id", "姿势"), ("garment_id", "服装")) if parameters.get(key)]
+        if picked:
+            lines.append("  ·  ".join(picked))
         negative = " ".join((parameters.get("negative_prompt") or "").split())
         if negative:
             lines.append("负面 " + (negative[:60] + "…" if len(negative) > 60 else negative))
@@ -1136,6 +1183,7 @@ class Window(QMainWindow):
         if prompt_scroll or negative_scroll:
             QTimer.singleShot(0, lambda: self._restore_detail_scroll(prompt_scroll, negative_scroll))
         self.show_reference(job)
+        self.show_library_refs(job)
         for control in (self.reuse_button, self.rerun_button, self.copy_json_button,
                         self.folder_button, self.log_button):
             control.setEnabled(bool(job.get("job_id")) and not self.submitting)
@@ -1223,11 +1271,22 @@ class Window(QMainWindow):
         elif obj is getattr(self, "reference_thumb", None) \
                 and event.type() == QEvent.Type.MouseButtonRelease:
             self.open_reference()
+        elif event.type() == QEvent.Type.MouseButtonRelease:
+            # 姿势 / 服装缩略图共用这一个分支：谁被点开谁那一张。
+            for title, thumb_name in (("姿势", "pose_thumb"), ("服装", "garment_thumb")):
+                if obj is getattr(self, thumb_name, None):
+                    self.open_library(title)
+                    break
         return super().eventFilter(obj, event)
 
     def open_reference(self):
         if self.reference_source is not None:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.reference_source)))
+
+    def open_library(self, title):
+        source = (getattr(self, "library_source", None) or {}).get(title)
+        if source is not None:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(source)))
 
     def open_original(self):
         job_id, artifact_id = self.selected, self.artifact
@@ -1331,6 +1390,82 @@ class Window(QMainWindow):
         self.reference_caption.setText(caption)
         self.reference_block.setVisible(True)
 
+    def library_row(self, layout, title):
+        """详情栏里的一行「图库参考」：72×72 缩略图 + 一行说明。"""
+        row = QWidget()
+        line = QHBoxLayout(row)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(10)
+        thumb = QLabel()
+        thumb.setObjectName("referenceThumb")
+        thumb.setFixedSize(72, 72)
+        thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        thumb.setToolTip(f"点击用系统图片查看器打开这张{title}图")
+        thumb.setCursor(Qt.CursorShape.PointingHandCursor)
+        thumb.installEventFilter(self)
+        line.addWidget(thumb)
+        caption = label("", "caption", True)
+        caption.setTextFormat(Qt.TextFormat.PlainText)
+        line.addWidget(caption, 1)
+        layout.addWidget(row)
+        return thumb, caption
+
+    def show_library_refs(self, job):
+        """历史里的姿势 / 服装：优先读任务附属物，读不到才说"没留下"。"""
+        block = getattr(self, "library_block", None)
+        if block is None:
+            return
+        block.setVisible(False)
+        self.library_source = {}
+        parameters = job.get("parameters") or {}
+        # 跑着的时候附属物还没落盘（发布成功才转存），别写成"没有留存"吓人。
+        settled = job.get("status") in TERMINAL
+        shown = False
+        # 每一对：参数名 / 附属物文件名 / 中文名 / 控件
+        for key, name, title, thumb_name, caption_name in (
+                ("pose_id", POSE_NAME, "姿势", "pose_thumb", "pose_caption"),
+                ("garment_id", GARMENT_NAME, "服装", "garment_thumb", "garment_caption")):
+            thumb = getattr(self, thumb_name, None)
+            caption = getattr(self, caption_name, None)
+            if thumb is None or caption is None:
+                continue
+            thumb.clear()
+            caption.setText("")
+            row = thumb.parentWidget()
+            if row is not None:
+                row.setVisible(False)      # 上一条任务的残留行不许漏出来
+            item_id = parameters.get(key)
+            if not item_id:
+                continue
+            if row is not None:
+                row.setVisible(True)
+            source = self.library_paths(job, name)
+            if source is None:
+                # 早期任务没存附属物：留一句"当时选的是哪一张"也算有交代。
+                caption.setText(f"{title} · {item_id}" + ("（没有留存图片）" if settled else ""))
+                shown = True
+                continue
+            pixmap = QPixmap(str(source))
+            if pixmap.isNull():
+                thumb.setText("无法读取")
+            else:
+                thumb.setPixmap(pixmap.scaled(
+                    QSize(68, 68), Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation))
+            self.library_source[title] = source
+            caption.setText(f"{title} · {item_id}")
+            shown = True
+        if shown:
+            block.setVisible(True)
+
+    def library_paths(self, job, name):
+        try:
+            folder = self.data / "results" / str(UUID(str(job["job_id"])))
+        except (ValueError, TypeError):
+            return None
+        candidate = folder / name
+        return candidate if candidate.is_file() else None
+
     # ---------- 动作（方案 §3.3） ----------
     def hide_actions(self):
         self.actions.setVisible(False)
@@ -1379,6 +1514,17 @@ class Window(QMainWindow):
         elif token and self.reference.locked:
             self.form_note.setText("这条任务用的是图生图模型，参考图没有回填")
             return job
+        # 姿势 / 服装：选择器可能在上面 setCurrentIndex 之后才建出来，也可能
+        # 因为当前工作流不支持而为 None —— 只回填真的存在的那个。
+        for key, attribute in (("pose_id", "pose_picker"), ("garment_id", "garment_picker")):
+            picker = getattr(self, attribute, None)
+            if picker is None:
+                continue
+            chosen = parameters.get(key) or ""
+            if chosen:
+                picker.select_id(chosen)     # 条目被删也能靠编号摆上，不阻断回填
+            else:
+                picker.clear()
         self.form_note.setText("已按这一条重新排好参数，换了一个新种子" if rerun
                                else "已回填这一条的参数（未提交）")
         return job
@@ -1399,7 +1545,7 @@ class Window(QMainWindow):
                    "negative_prompt": parameters.get("negative_prompt"),
                    "width": parameters.get("width"),
                    "height": parameters.get("height")}
-        for key in ("strength", "image"):
+        for key in ("strength", "image", "pose_id", "garment_id"):
             if parameters.get(key) is not None:
                 payload[key] = parameters[key]
         QApplication.clipboard().setText(json.dumps(payload, ensure_ascii=False))
@@ -1449,6 +1595,8 @@ class Window(QMainWindow):
                 self.copy_negative_button.setEnabled(False)
                 self.hide_actions()
                 self.reference_block.setVisible(False)
+                if getattr(self, "library_block", None) is not None:
+                    self.library_block.setVisible(False)
                 self.clear_image("任务已删除")
                 self.detail.setText("从历史中选择任务查看详情")
             self.render_history()
@@ -1574,6 +1722,23 @@ def dsh_tray_icon():
     return QIcon(pixmap)
 
 
+def build_tray_menu(window, open_window, quit_app):
+    """托盘右键菜单。
+
+    必须挂在窗口上（parent=window）并由 window 持有引用 —— 之前 `QMenu()` 无父对象、
+    只有 tray 自己引用它，PySide 端 menu 随局部作用域被回收，右键就变成空弹窗：
+    用户只能回到软件里点「保存后退出」，右键根本找不到「退出」。
+    """
+    menu = QMenu(window)
+    window.tray_menu = menu
+    menu.addAction("打开 LocalGen").triggered.connect(open_window)
+    menu.addSeparator()
+    exit_action = menu.addAction("退出 LocalGen")
+    exit_action.setToolTip("保存界面状态后完全退出（含本机 API 服务）")
+    exit_action.triggered.connect(quit_app)
+    return menu
+
+
 def run_desktop(server, sock, data, settings, token, serve):
     app = QApplication([])
     app.setApplicationName("LocalGen")
@@ -1591,26 +1756,22 @@ def run_desktop(server, sock, data, settings, token, serve):
         window.timer.stop()
         server.should_exit = True
 
-    tray = QSystemTrayIcon(dsh_tray_icon())
-    tray_menu = QMenu()
-    open_action = tray_menu.addAction("打开 LocalGen")
-    exit_action = tray_menu.addAction("退出")
+    # 菜单必须挂在窗口上并由 window 持有引用（见 build_tray_menu 的注释）。
+    tray = QSystemTrayIcon(dsh_tray_icon(), window)
 
     def open_window():
         window.show()
         window.raise_()
         window.activateWindow()
 
-    open_action.triggered.connect(open_window)
-
     def quit_app():
         window.save_ui()
         window.real_exit = True
         window.close()
 
-    exit_action.triggered.connect(quit_app)
+    tray_menu = build_tray_menu(window, open_window, quit_app)
     tray.setContextMenu(tray_menu)
-    tray.setToolTip("LocalGen · 本地生图工作台")
+    tray.setToolTip("LocalGen · 本地生图工作台（右键可退出）")
     tray.activated.connect(lambda reason: open_window()
                            if reason in (QSystemTrayIcon.ActivationReason.Trigger,
                                          QSystemTrayIcon.ActivationReason.DoubleClick) else None)

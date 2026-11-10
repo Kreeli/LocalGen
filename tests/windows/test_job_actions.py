@@ -5,6 +5,7 @@
 """
 import json
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -187,6 +188,78 @@ def test_actions_enabled_only_with_a_selected_job(window):
     assert not window.reuse_button.isEnabled()
     window.show_job(payload())
     assert not window.actions.isHidden() and window.reuse_button.isEnabled()
+
+
+# ---------- 姿势 / 服装：历史里要能看见当时选的那一张 ----------
+
+def library_payload(**overrides):
+    parameters = dict(payload()["parameters"], pose_id="full_sexy_P001_front",
+                      garment_id="SPR-0001")
+    return payload(parameters=parameters, **overrides)
+
+
+def test_library_block_shows_the_kept_pose_and_garment(window, tmp_path):
+    write_image(tmp_path / "results" / JOB_ID / "pose.png", (768, 1024))
+    write_image(tmp_path / "results" / JOB_ID / "garment.png", (683, 1024))
+    window.show_job(library_payload())
+    assert not window.library_block.isHidden()
+    assert not window.pose_thumb.pixmap().isNull()
+    assert not window.garment_thumb.pixmap().isNull()
+    assert "full_sexy_P001_front" in window.pose_caption.text()
+    assert "SPR-0001" in window.garment_caption.text()
+    assert window.library_source == {
+        "姿势": tmp_path / "results" / JOB_ID / "pose.png",
+        "服装": tmp_path / "results" / JOB_ID / "garment.png",
+    }
+
+
+def test_library_block_names_the_pick_when_the_copy_is_gone(window):
+    """早期任务没转存附属物：至少说清当时选的是哪一条，别只留空白。"""
+    window.show_job(library_payload())
+    assert not window.library_block.isHidden()
+    assert "没有留存图片" in window.pose_caption.text()
+    assert window.pose_thumb.pixmap().isNull()
+    assert window.library_source == {}
+
+
+def test_library_block_hidden_for_a_job_without_library_picks(window):
+    window.show_job(payload())
+    assert window.library_block.isHidden()
+    assert window.pose_caption.text() == "" and window.garment_caption.text() == ""
+
+
+def test_library_block_shows_only_the_picked_kind(window, tmp_path):
+    write_image(tmp_path / "results" / JOB_ID / "garment.png", (683, 1024))
+    parameters = dict(payload()["parameters"], garment_id="SPR-0002")
+    window.show_job(payload(parameters=parameters))
+    assert not window.library_block.isHidden()
+    assert window.pose_caption.text() == "" and window.pose_thumb.pixmap().isNull()
+    assert "SPR-0002" in window.garment_caption.text()
+
+
+def test_open_library_opens_the_kept_copy(window, tmp_path, monkeypatch):
+    write_image(tmp_path / "results" / JOB_ID / "pose.png", (768, 1024))
+    window.show_job(library_payload())
+    opened = []
+    monkeypatch.setattr("localgen.desktop.QDesktopServices.openUrl",
+                        lambda url: opened.append(url.toLocalFile()) or True)
+    window.open_library("姿势")
+    # QUrl 会把分隔符统一成 '/'，比较前先按 Path 规整。
+    assert [Path(one) for one in opened] == [tmp_path / "results" / JOB_ID / "pose.png"]
+
+
+def test_describe_names_the_picked_library_items(window):
+    text = window.describe(library_payload())
+    assert "姿势 full_sexy_P001_front" in text and "服装 SPR-0001" in text
+    assert all(len(line) <= 60 for line in text.splitlines())
+
+
+def test_copy_parameters_carries_the_library_ids(window):
+    window.latest = [library_payload()]
+    window.selected = JOB_ID
+    window.copy_parameters()
+    data = json.loads(QApplication.clipboard().text())
+    assert data["pose_id"] == "full_sexy_P001_front" and data["garment_id"] == "SPR-0001"
 
 
 # ---------- 参考图控件的回填 ----------

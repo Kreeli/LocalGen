@@ -56,6 +56,17 @@ QMessageBox { background: #191d29; }
 QMessageBox QLabel { color: #e7e9f4; }
 QFrame#reference { background: #141824; border: 1px dashed #333c54; border-radius: 10px; }
 QFrame#reference[locked="yes"] { background: #14161f; border: 1px dashed #262c3c; }
+QFrame#libraryPicker { background: #141824; border: 1px solid #2c3449; border-radius: 10px; }
+QFrame#libraryPicker:disabled { background: #12141d; border-color: #222736; }
+QLabel#libraryThumb { background: #10131e; border: 1px dashed #323a51; border-radius: 8px;
+    font-size: 11px; color: #79839b; }
+QLabel#libraryThumb[filled="yes"] { border: 1px solid #3a4360; }
+QLabel#libraryName { font-weight: 600; color: #dfe4f2; font-size: 12px; }
+QLabel#libraryHint { font-size: 11px; color: #8f9ab4; }
+QToolButton#libraryCard { background: #141824; border: 1px solid #2c3449; border-radius: 8px;
+    font-size: 11px; font-weight: 500; color: #c3cbe0; padding: 3px 2px; text-align: center; }
+QToolButton#libraryCard:hover { border-color: #6d74a0; background: #1c2131; }
+QToolButton#libraryCard[selected="true"] { border: 1px solid #9b87ff; background: #241f3a; }
 QLabel#referenceName { font-weight: 600; color: #dfe4f2; }
 QLabel#referenceHint { font-size: 11px; color: #e4c393; }
 QSlider::groove:horizontal { height: 4px; background: #262c3c; border-radius: 2px; }

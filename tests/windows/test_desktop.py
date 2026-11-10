@@ -139,3 +139,23 @@ def test_desktop_reference_upload_and_lock(tmp_path, qt_app):
             window.close()
             server.should_exit = True
             thread.join(10)
+
+
+def test_tray_menu_has_a_working_exit(qt_app):
+    """回归：QMenu 无父对象时托盘右键是空弹窗，用户点不到「退出」。"""
+    from PySide6.QtWidgets import QWidget
+
+    from localgen.desktop import build_tray_menu
+
+    window = QWidget()
+    calls = []
+    menu = build_tray_menu(window, lambda: calls.append("open"), lambda: calls.append("quit"))
+    texts = [action.text() for action in menu.actions() if not action.isSeparator()]
+    assert texts == ["打开 LocalGen", "退出 LocalGen"]
+    assert menu.parent() is window               # 有父对象才不会被回收
+    assert window.tray_menu is menu              # window 也持有引用
+    for action in menu.actions():
+        if action.text() == "退出 LocalGen":
+            action.trigger()
+    assert calls == ["quit"]
+    window.deleteLater()

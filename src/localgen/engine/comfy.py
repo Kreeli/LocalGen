@@ -358,7 +358,12 @@ class ComfyEngine:
         if self.process.alive():
             return Observation(progress=job.progress, stage=job.stage, detail=job.note)
         code = self.process.exit_code()
-        if job.advance_ready(code):
+        # 两段式接续只属于 PoseSwapJob。MossJob / KontextJob / QwenImageJob 没有
+        # advance_ready——曾经无条件调用导致每个 sd-cli 任务收尾必 AttributeError，
+        # JOB_INTERNAL_ERROR 把真实的 GPU_OOM 吞掉、甚至丢掉已解码完成的成品
+        # （2026-11-11 真机 4 连失败，traceback 见用户数据目录 localgen.log）。
+        advance_ready = getattr(job, "advance_ready", None)
+        if advance_ready is not None and advance_ready(code):
             # 两段式（姿势段 → 换装段）：上一段成功，立即 materialize 下一段并拉起。
             # 不走 recycle——引擎状态保持 SDCPP_ACTIVE，调度器/REST 契约完全无感。
             try:
